@@ -42,12 +42,12 @@ export class MessageSender {
         var dto = new MouseWheelDto(deltaX, deltaY);
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.MouseWheel);
     }
-    async SendKeyDown(key) {
-        var dto = new KeyDownDto(key);
+    async SendKeyDown(key, code) {
+        var dto = new KeyDownDto(key, code);
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.KeyDown);
     }
-    async SendKeyUp(key) {
-        var dto = new KeyUpDto(key);
+    async SendKeyUp(key, code) {
+        var dto = new KeyUpDto(key, code);
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.KeyUp);
     }
     async SendKeyPress(key) {

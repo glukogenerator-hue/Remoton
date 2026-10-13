@@ -21,6 +21,14 @@ public class KeyboardMouseInputWin(
     private volatile bool _inputBlocked;
     private Thread? _inputProcessingThread;
 
+    /// <summary>
+    /// Нажатые сейчас клавиши и способ, которым они были отправлены (по code, а если его нет, по key).
+    /// Отпускание повторяет способ нажатия: иначе клавиша «залипнет», если Ctrl отпустили раньше неё.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SentKey> _pressedKeys = new();
+
+    private readonly record struct SentKey(VirtualKey? Vk, ushort? Unicode);
+
     [Flags]
     private enum ShiftState : byte
     {
@@ -38,7 +46,7 @@ public class KeyboardMouseInputWin(
         StartInputProcessingThread();
     }
 
-    public void SendKeyDown(string key)
+    public void SendKeyDown(string key, string? code = null)
     {
         TryOnInputDesktop(() =>
         {
@@ -46,14 +54,12 @@ public class KeyboardMouseInputWin(
             {
                 try
                 {
-                    if (!ConvertJavaScriptKeyToVirtualKey(key, out var vk))
+                    if (!TryCreateKeyInput(key, code, true, out var input))
                     {
                         _logger.LogWarning("Unable to simulate key input {key}.", key);
                         return;
-                    };
+                    }
 
-
-                    var input = CreateKeyboardInput(vk.Value, true);
                     var sent = SendInput(1, [input], INPUT.Size);
                     if (sent == 0)
                     {
@@ -76,20 +82,18 @@ public class KeyboardMouseInputWin(
         });
     }
 
-    public void SendKeyUp(string key)
+    public void SendKeyUp(string key, string? code = null)
     {
         TryOnInputDesktop(() =>
         {
             try
             {
-                if (!ConvertJavaScriptKeyToVirtualKey(key, out var vk))
+                if (!TryCreateKeyInput(key, code, false, out var input))
                 {
                     _logger.LogWarning("Unable to simulate key input {key}.", key);
                     return;
-                };
+                }
 
-
-                var input = CreateKeyboardInput(vk.Value, false);
                 var sent = SendInput(1, [input], INPUT.Size);
                 if (sent == 0)
                 {
@@ -297,6 +301,13 @@ public class KeyboardMouseInputWin(
     {
         TryOnInputDesktop(() =>
         {
+            // Сначала отпускаем клавиши, которые нажимали мы сами (в том числе Unicode-символы).
+            foreach (var sent in _pressedKeys.Values)
+            {
+                SendInput(1, [CreateKeyInput(sent, false)], INPUT.Size);
+            }
+            _pressedKeys.Clear();
+
             foreach (VirtualKey key in Enum.GetValues(typeof(VirtualKey)))
             {
                 try
@@ -368,7 +379,7 @@ public class KeyboardMouseInputWin(
                 ki = new KEYBDINPUT()
                 {
                     wVk = virtualKey,
-                    wScan = (ushort)MapVirtualKeyEx((uint)virtualKey, VkMapType.MAPVK_VK_TO_VSC_EX, GetKeyboardLayout((uint)Environment.CurrentManagedThreadId)),
+                    wScan = (ushort)MapVirtualKeyEx((uint)virtualKey, VkMapType.MAPVK_VK_TO_VSC_EX, GetKeyboardLayout(0)),
                     dwExtraInfo = GetMessageExtraInfo(),
                     dwFlags = flags,
                     time = 0
@@ -485,17 +496,174 @@ public class KeyboardMouseInputWin(
             "F11" => VirtualKey.F11,
             "F12" => VirtualKey.F12,
             "Meta" => VirtualKey.LWIN,
-            "ContextMenu" => VirtualKey.MENU,
-            _ => key.Length == 1 ?
-                    (VirtualKey)VkKeyScan(Convert.ToChar(key)) :
-                    null
+            "ContextMenu" => VirtualKey.APPS,
+            "PrintScreen" => VirtualKey.SNAPSHOT,
+            "Clear" => VirtualKey.CLEAR,
+            _ => null
         };
 
-        if (result is null)
+        return result is not null;
+    }
+
+    private static INPUT CreateKeyInput(SentKey sent, bool isPressed)
+    {
+        return sent.Vk is { } vk ?
+            CreateKeyboardInput(vk, isPressed) :
+            CreateKeyboardInput(sent.Unicode!.Value, isPressed);
+    }
+
+    /// <summary>
+    /// Печатаемые Ctrl/Alt/Win-сочетания. Ctrl+Alt без Win — это AltGr на многих раскладках,
+    /// поэтому такой символ вводится как есть.
+    /// </summary>
+    private bool IsShortcutActive()
+    {
+        bool ctrl = false, alt = false, win = false;
+        foreach (var sent in _pressedKeys.Values)
+        {
+            switch (sent.Vk)
+            {
+                case VirtualKey.CONTROL or VirtualKey.LCONTROL or VirtualKey.RCONTROL:
+                    ctrl = true;
+                    break;
+                case VirtualKey.MENU or VirtualKey.LMENU or VirtualKey.RMENU:
+                    alt = true;
+                    break;
+                case VirtualKey.LWIN or VirtualKey.RWIN:
+                    win = true;
+                    break;
+            }
+        }
+        return win || (ctrl != alt);
+    }
+
+    /// <summary>
+    /// Физическая клавиша по KeyboardEvent.code. Не зависит от раскладки клиента и хоста.
+    /// </summary>
+    private static bool TryConvertCodeToVirtualKey(string? code, out VirtualKey result)
+    {
+        result = default;
+        if (string.IsNullOrEmpty(code))
+        {
+            return false;
+        }
+
+        if (code.Length == 4 && code.StartsWith("Key") && code[3] is >= 'A' and <= 'Z')
+        {
+            result = (VirtualKey)code[3];
+            return true;
+        }
+
+        if (code.Length == 6 && code.StartsWith("Digit") && code[5] is >= '0' and <= '9')
+        {
+            result = (VirtualKey)code[5];
+            return true;
+        }
+
+        if (code.Length == 7 && code.StartsWith("Numpad") && code[6] is >= '0' and <= '9')
+        {
+            result = (VirtualKey)((short)VirtualKey.NUMPAD0 + (code[6] - '0'));
+            return true;
+        }
+
+        VirtualKey? mapped = code switch
+        {
+            "Minus" => VirtualKey.OEM_MINUS,
+            "Equal" => VirtualKey.OEM_PLUS,
+            "BracketLeft" => VirtualKey.OEM_4,
+            "BracketRight" => VirtualKey.OEM_6,
+            "Backslash" => VirtualKey.OEM_5,
+            "Semicolon" => VirtualKey.OEM_1,
+            "Quote" => VirtualKey.OEM_7,
+            "Comma" => VirtualKey.OEM_COMMA,
+            "Period" => VirtualKey.OEM_PERIOD,
+            "Slash" => VirtualKey.OEM_2,
+            "Backquote" => VirtualKey.OEM_3,
+            "IntlBackslash" => VirtualKey.OEM_102,
+            "NumpadMultiply" => VirtualKey.MULTIPLY,
+            "NumpadAdd" => VirtualKey.ADD,
+            "NumpadSubtract" => VirtualKey.SUBTRACT,
+            "NumpadDecimal" => VirtualKey.DECIMAL,
+            "NumpadDivide" => VirtualKey.DIVIDE,
+            "Space" => VirtualKey.SPACE,
+            _ => null
+        };
+
+        if (mapped is null)
+        {
+            return false;
+        }
+
+        result = mapped.Value;
+        return true;
+    }
+
+    /// <summary>
+    /// Выбирает способ ввода. Именованные клавиши идут как виртуальные.
+    /// Символ вводится как Unicode (работает в любой раскладке, включая русскую), а в сочетаниях
+    /// с Ctrl/Alt/Win используется физическая клавиша, иначе приложения не распознают горячие клавиши.
+    /// </summary>
+    private bool TryResolveKey(string key, string? code, out SentKey resolved)
+    {
+        resolved = default;
+
+        if (ConvertJavaScriptKeyToVirtualKey(key, out var named))
+        {
+            resolved = new SentKey(named, null);
+            return true;
+        }
+
+        if (key.Length != 1)
+        {
+            return false;
+        }
+
+        var character = key[0];
+
+        if (IsShortcutActive())
+        {
+            if (TryConvertCodeToVirtualKey(code, out var physical))
+            {
+                resolved = new SentKey(physical, null);
+                return true;
+            }
+
+            // Старый клиент без code: пробуем найти клавишу в раскладке хоста.
+            var scan = VkKeyScanEx(character, GetKeyboardLayout(0));
+            if (scan != -1)
+            {
+                resolved = new SentKey((VirtualKey)(scan & 0xFF), null);
+                return true;
+            }
+        }
+
+        resolved = new SentKey(null, character);
+        return true;
+    }
+
+    private bool TryCreateKeyInput(string key, string? code, bool isPressed, out INPUT input)
+    {
+        input = default;
+        var id = string.IsNullOrEmpty(code) ? key : code;
+
+        if (!isPressed && _pressedKeys.TryRemove(id, out var pressed))
+        {
+            input = CreateKeyInput(pressed, false);
+            return true;
+        }
+
+        if (!TryResolveKey(key, code, out var resolved))
         {
             _logger.LogWarning("Unable to parse key input: {key}.", key);
             return false;
         }
+
+        if (isPressed)
+        {
+            _pressedKeys[id] = resolved;
+        }
+
+        input = CreateKeyInput(resolved, isPressed);
         return true;
     }
 

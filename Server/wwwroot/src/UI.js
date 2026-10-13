@@ -66,7 +66,7 @@ export function Prompt(promptMessage) {
         var modalDiv = document.createElement("div");
         modalDiv.classList.add("modal-prompt");
         var messageDiv = document.createElement("div");
-        messageDiv.innerHTML = promptMessage;
+        messageDiv.textContent = promptMessage;
         var responseInput = document.createElement("input");
         var buttonsDiv = document.createElement("div");
         buttonsDiv.classList.add("buttons-footer");
@@ -101,7 +101,7 @@ export function SetStatusMessage(message) {
 export function ShowToast(message) {
     var messageDiv = document.createElement("div");
     messageDiv.classList.add("toast-message");
-    messageDiv.innerHTML = message;
+    messageDiv.textContent = message;
     ToastsWrapper.appendChild(messageDiv);
     window.setTimeout(() => {
         messageDiv.remove();

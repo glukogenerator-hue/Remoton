@@ -23,7 +23,7 @@ public class KeyboardMouseInputLinux : IKeyboardMouseInput
         // thread.  Linux doesn't.
     }
 
-    public void SendKeyDown(string key)
+    public void SendKeyDown(string key, string? code = null)
     {
         try
         {
@@ -46,7 +46,7 @@ public class KeyboardMouseInputLinux : IKeyboardMouseInput
         }
     }
 
-    public void SendKeyUp(string key)
+    public void SendKeyUp(string key, string? code = null)
     {
         try
         {
@@ -237,7 +237,8 @@ public class KeyboardMouseInputLinux : IKeyboardMouseInput
             "|" => "bar",
             "}" => "braceright",
             "~" => "asciitilde",
-            _ => key,
+            // Символы вне ASCII (например, кириллица): X11 принимает имя keysym вида U044F.
+            _ => key.Length == 1 && key[0] > 127 ? $"U{(int)key[0]:X4}" : key,
         };
         return keySym;
     }

@@ -54,7 +54,8 @@ public class LogsManager : ILogsManager
             return;
         }
 
-        await foreach (var file in files.ToAsyncEnumerable())
+        // Явный вызов: в .NET 10 в System.Linq появился собственный ToAsyncEnumerable.
+        await foreach (var file in Remotely.Shared.Extensions.IEnumerableExtensions.ToAsyncEnumerable(files))
         {
             try
             {
