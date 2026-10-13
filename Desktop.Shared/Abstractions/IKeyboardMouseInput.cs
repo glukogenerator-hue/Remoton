@@ -6,8 +6,10 @@ namespace Remotely.Desktop.Shared.Abstractions;
 public interface IKeyboardMouseInput
 {
     void Init();
-    void SendKeyDown(string key);
-    void SendKeyUp(string key);
+    /// <param name="key">KeyboardEvent.key: символ или имя клавиши.</param>
+    /// <param name="code">KeyboardEvent.code: физическая клавиша, если клиент её передал.</param>
+    void SendKeyDown(string key, string? code = null);
+    void SendKeyUp(string key, string? code = null);
     void SendMouseMove(double percentX, double percentY, IViewer viewer);
     void SendMouseWheel(int deltaY);
     void SendText(string transferText);

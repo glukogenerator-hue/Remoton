@@ -67,11 +67,14 @@ export class FileDto {
 }
 
 export class KeyDownDto {
-    constructor(key: string) {
+    constructor(key: string, code?: string) {
         this.Key = key;
+        this.Code = code;
     }
 
     Key: string;
+    /** Физическая клавиша (KeyboardEvent.code), не зависит от раскладки. */
+    Code?: string;
 }
 
 export class KeyPressDto {
@@ -83,11 +86,14 @@ export class KeyPressDto {
 }
 
 export class KeyUpDto {
-    constructor(key: string) {
+    constructor(key: string, code?: string) {
         this.Key = key;
+        this.Code = code;
     }
 
     Key: string;
+    /** Физическая клавиша (KeyboardEvent.code), не зависит от раскладки. */
+    Code?: string;
 }
 
 export class MouseDownDto {

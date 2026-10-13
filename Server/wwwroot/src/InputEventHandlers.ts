@@ -761,10 +761,12 @@ export function ApplyInputHandlers() {
         if (ViewerApp.ViewOnlyMode) {
             return;
         }
-        if (!e.ctrlKey || !e.shiftKey || e.key.toLowerCase() != "i") {
+        // Ctrl+Shift+I (инструменты разработчика) проверяем по физической клавише:
+        // при русской раскладке e.key равен "ш".
+        if (!e.ctrlKey || !e.shiftKey || e.code != "KeyI") {
             e.preventDefault();
         }
-        await ViewerApp.MessageSender.SendKeyDown(e.key);
+        await ViewerApp.MessageSender.SendKeyDown(e.key, e.code);
     });
     window.addEventListener("keyup", async function (e) {
         if (
@@ -777,7 +779,7 @@ export function ApplyInputHandlers() {
         if (ViewerApp.ViewOnlyMode) {
             return;
         }
-        await ViewerApp.MessageSender.SendKeyUp(e.key);
+        await ViewerApp.MessageSender.SendKeyUp(e.key, e.code);
     });
 
     window.addEventListener("blur", async () => {

@@ -203,7 +203,7 @@ public class DtoMessageHandler : IDtoMessageHandler
             _logger.LogWarning("Key input is empty.");
             return;
         }
-        _keyboardMouseInput.SendKeyDown(dto.Key);
+        _keyboardMouseInput.SendKeyDown(dto.Key, dto.Code);
     }
 
     private async Task KeyPress(DtoWrapper wrapper)
@@ -236,7 +236,7 @@ public class DtoMessageHandler : IDtoMessageHandler
             _logger.LogWarning("Key input is empty.");
             return;
         }
-        _keyboardMouseInput.SendKeyUp(dto.Key);
+        _keyboardMouseInput.SendKeyUp(dto.Key, dto.Code);
     }
 
     private void MouseDown(DtoWrapper wrapper, IViewer viewer)

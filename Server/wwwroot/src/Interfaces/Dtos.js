@@ -20,8 +20,9 @@ export class FileDto {
     }
 }
 export class KeyDownDto {
-    constructor(key) {
+    constructor(key, code) {
         this.Key = key;
+        this.Code = code;
     }
 }
 export class KeyPressDto {
@@ -30,8 +31,9 @@ export class KeyPressDto {
     }
 }
 export class KeyUpDto {
-    constructor(key) {
+    constructor(key, code) {
         this.Key = key;
+        this.Code = code;
     }
 }
 export class MouseDownDto {
