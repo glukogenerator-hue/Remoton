@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Library Manager (unpkg) не может восстановить JS-библиотеки при сборке,
+  # а сами файлы уже лежат в Server/wwwroot/lib.
+  BUILD_ARGS: -p:LibraryRestore=false
+
+jobs:
+  build-test:
+    name: Сборка и тесты
+    # Решение содержит проекты net8.0-windows (Desktop.Win, LoadTester), поэтому Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore Remotely.sln
+
+      - name: Build
+        run: dotnet build Remotely.sln --no-restore --configuration Release ${{ env.BUILD_ARGS }}
+
+      - name: Test (Shared.Tests, Server.Tests)
+        run: |
+          dotnet test Tests/Shared.Tests/Shared.Tests.csproj --no-build --configuration Release ${{ env.BUILD_ARGS }}
+          dotnet test Tests/Server.Tests/Server.Tests.csproj --no-build --configuration Release ${{ env.BUILD_ARGS }}
+
+  audit:
+    name: Аудит уязвимостей NuGet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Перебираем *.csproj, а не .sln: docker-compose.dcproj (Visual Studio) на Linux не восстанавливается.
+      - name: Поиск уязвимых пакетов (включая транзитивные)
+        shell: bash
+        run: |
+          failed=0
+          for proj in $(find . -name '*.csproj' -not -path './node_modules/*'); do
+            dotnet restore "$proj" -p:EnableWindowsTargeting=true > /dev/null
+            dotnet list "$proj" package --vulnerable --include-transitive --format json > audit.json
+            if grep -q '"vulnerabilities"' audit.json; then
+              echo "::error::Уязвимые пакеты в $proj"
+              dotnet list "$proj" package --vulnerable --include-transitive
+              failed=1
+            fi
+          done
+          if [ "$failed" -eq 0 ]; then echo "Уязвимых пакетов нет."; fi
+          exit $failed
