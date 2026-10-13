@@ -35,7 +35,7 @@ services:
       # The Docker gateway will be used in Forwarded Headers, which is necessary to
       # to correctly determine request hostname and scheme within the app.  If you change
       # the network config, you must update this value as well.
-      - Remotely_ApplicationOptions__DockerGateway=172.28.0.1
+      - Remotely_ApplicationOptions__DockerGatewayIp=172.28.0.1
       # This path shouldn't be changed.  It points to the Docker volume.
       - Remotely_ConnectionStrings__SQLite=Data Source=/app/AppData/Remotely.db
       # If using SQL Server, change the connection string to point to your SQL Server instance.
