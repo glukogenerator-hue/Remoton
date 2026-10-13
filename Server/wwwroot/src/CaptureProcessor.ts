@@ -1,65 +1,152 @@
-﻿import { ViewerApp } from "./App.js";
+import { ViewerApp } from "./App.js";
 import { StreamingState } from "./Models/StreamingState.js";
 import { Screen2DContext } from "./UI.js";
 import { GetUint64 } from "./Utilities.js";
 
 const FrameHeaderSize = 28;
 
+// Защита от испорченного заголовка: кадр не может быть больше этого размера.
+const MaxImageSize = 64 * 1024 * 1024;
 
+interface Frame {
+    X: number;
+    Y: number;
+    Width: number;
+    Height: number;
+    Timestamp: number;
+    Image: Uint8Array;
+}
+
+function AppendChunk(streamingState: StreamingState, chunk: Uint8Array) {
+    const used = streamingState.End - streamingState.Start;
+
+    if (streamingState.End + chunk.length > streamingState.Buffer.length) {
+        if (used + chunk.length <= streamingState.Buffer.length) {
+            // Места достаточно, нужно только сдвинуть данные в начало буфера.
+            streamingState.Buffer.copyWithin(0, streamingState.Start, streamingState.End);
+        }
+        else {
+            const grown = new Uint8Array(Math.max((used + chunk.length) * 2, streamingState.Buffer.length));
+            grown.set(streamingState.Buffer.subarray(streamingState.Start, streamingState.End), 0);
+            streamingState.Buffer = grown;
+        }
+        streamingState.Start = 0;
+        streamingState.End = used;
+    }
+
+    streamingState.Buffer.set(chunk, streamingState.End);
+    streamingState.End += chunk.length;
+}
+
+function TryTakeFrame(streamingState: StreamingState): Frame | null {
+    const available = streamingState.End - streamingState.Start;
+
+    if (available < FrameHeaderSize) {
+        return null;
+    }
+
+    const header = new DataView(
+        streamingState.Buffer.buffer,
+        streamingState.Buffer.byteOffset + streamingState.Start,
+        FrameHeaderSize);
+
+    const imageSize = header.getInt32(0, true);
+
+    if (imageSize <= 0 || imageSize > MaxImageSize) {
+        throw new Error(`Invalid frame size: ${imageSize}`);
+    }
+
+    if (available - FrameHeaderSize < imageSize) {
+        return null;
+    }
+
+    const imageStart = streamingState.Start + FrameHeaderSize;
+
+    const frame: Frame = {
+        X: header.getFloat32(4, true),
+        Y: header.getFloat32(8, true),
+        Width: header.getFloat32(12, true),
+        Height: header.getFloat32(16, true),
+        Timestamp: GetUint64(header, 20, true),
+        // slice копирует байты, поэтому буфер можно переиспользовать.
+        Image: streamingState.Buffer.slice(imageStart, imageStart + imageSize)
+    };
+
+    streamingState.Start = imageStart + imageSize;
+
+    if (streamingState.Start === streamingState.End) {
+        streamingState.Start = 0;
+        streamingState.End = 0;
+    }
+
+    return frame;
+}
+
+async function DrawFrames(frames: Frame[]): Promise<void> {
+    // Кадры содержат только изменённые области, поэтому рисовать нужно строго по порядку.
+    // Декодируем все сразу (параллельно), а рисуем по очереди.
+    const decoded = frames.map(x => createImageBitmap(new Blob([x.Image])));
+
+    let index = 0;
+    try {
+        for (; index < frames.length; index++) {
+            const frame = frames[index];
+            const bitmap = await decoded[index];
+            try {
+                Screen2DContext.drawImage(bitmap, frame.X, frame.Y, frame.Width, frame.Height);
+            }
+            finally {
+                bitmap.close();
+            }
+            ViewerApp.MessageSender.SendFrameReceived(frame.Timestamp);
+        }
+    }
+    catch (ex) {
+        // Освобождаем оставшиеся битмапы.
+        for (let i = index + 1; i < decoded.length; i++) {
+            decoded[i].then(x => x.close(), () => { });
+        }
+        throw ex;
+    }
+}
+
+/**
+ * Разбирает накопленные байты на кадры и рисует их.
+ * Запускается при получении каждого чанка и не зависит от requestAnimationFrame,
+ * поэтому не замирает в фоновой вкладке и не ограничивает частоту кадров частотой монитора.
+ */
 export async function ProcessStream(streamingState: StreamingState): Promise<void> {
-    if (streamingState.StreamEnded) {
+    if (streamingState.IsProcessing) {
         return;
     }
 
+    streamingState.IsProcessing = true;
+
     try {
-        const chunks = streamingState.ReceivedChunks.splice(0);
-        streamingState.Buffer = new Blob([streamingState.Buffer, ...chunks]);
+        while (!streamingState.StreamEnded) {
+            for (const chunk of streamingState.ReceivedChunks.splice(0)) {
+                AppendChunk(streamingState, chunk);
+            }
 
-        const bufferSize = streamingState.Buffer.size;
+            const frames: Frame[] = [];
+            let frame: Frame | null;
+            while ((frame = TryTakeFrame(streamingState)) !== null) {
+                frames.push(frame);
+            }
 
-        if (bufferSize < FrameHeaderSize) {
-            return;
+            if (frames.length == 0) {
+                break;
+            }
+
+            await DrawFrames(frames);
         }
-
-        const headerBlob = streamingState.Buffer.slice(0, FrameHeaderSize);
-        const buffer = await headerBlob.arrayBuffer();
-
-        const dataView = new DataView(buffer);
-        const imageSize = dataView.getInt32(0, true);
-
-        if (bufferSize - FrameHeaderSize < imageSize) {
-            return;
-        }
-
-        const imageX = dataView.getFloat32(4, true);
-        const imageY = dataView.getFloat32(8, true);
-        const imageWidth = dataView.getFloat32(12, true);
-        const imageHeight = dataView.getFloat32(16, true);
-        const timestamp = GetUint64(dataView, 20, true);
-
-        const imageBlob = streamingState.Buffer.slice(FrameHeaderSize, FrameHeaderSize + imageSize);
-
-        const bitmap = await createImageBitmap(imageBlob);
-
-        Screen2DContext.drawImage(bitmap,
-            imageX,
-            imageY,
-            imageWidth,
-            imageHeight);
-
-        bitmap.close();
-
-        streamingState.Buffer = streamingState.Buffer.slice(FrameHeaderSize + imageSize);
-
-        ViewerApp.MessageSender.SendFrameReceived(timestamp);
     }
     catch (ex) {
         console.error("Capture processing error.  Resetting stream buffer.", ex);
-        streamingState.Buffer = new Blob();
+        streamingState.Start = 0;
+        streamingState.End = 0;
     }
     finally {
-        requestAnimationFrame(() => {
-            ProcessStream(streamingState);
-        });
+        streamingState.IsProcessing = false;
     }
 }

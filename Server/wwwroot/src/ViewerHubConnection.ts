@@ -132,6 +132,8 @@ export class ViewerHubConnection {
             .subscribe({
                 next: (chunk: Uint8Array) => {
                     streamingState.ReceivedChunks.push(chunk);
+                    // Разбор запускается на каждый чанк, а не по requestAnimationFrame.
+                    ProcessStream(streamingState);
                 },
                 complete: () => {
                     streamingState.StreamEnded = true;
