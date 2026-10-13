@@ -4,8 +4,8 @@
 
 ## Структура
 - `Server/` — ASP.NET сервер; веб-клиент в `Server/wwwroot/src` (TypeScript, скомпилированный `.js` лежит рядом и хранится в git)
-- `Agent/` — агент; `Desktop.*` — удалённый рабочий стол (Core, Win, Linux, UI, Native, Shared)
-- `Shared/` — общие модели; `Tests/` — Server.Tests, Shared.Tests, Desktop.Win.Tests, LoadTester
+- `Agent/` — агент; `Desktop.*` — удалённый рабочий стол (Win, Linux, UI, Native, Shared)
+- `Shared/` — общие модели; `Tests/` — Server.Tests, Shared.Tests, LoadTester
 - `docker-compose/` — запуск сервера в Docker
 
 ## Команды
