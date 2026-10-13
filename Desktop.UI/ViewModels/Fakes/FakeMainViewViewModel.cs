@@ -80,6 +80,8 @@ public class FakeMainViewViewModel : FakeBrandedViewModelBase, IMainViewViewMode
 
         public int ImageQuality => 80;
 
+        public TimeSpan MinFrameInterval => TimeSpan.Zero;
+
         public bool IsResponsive => true;
 
         public string Name { get; set; } = "Rick James";
