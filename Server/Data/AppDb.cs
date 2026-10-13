@@ -59,6 +59,11 @@ public class AppDb : IdentityDbContext
 
         base.OnModelCreating(builder);
 
+        // Passkeys (Identity в .NET 10) не используются. Исключаем их из модели,
+        // чтобы схема БД и существующие миграции остались прежними.
+        builder.Ignore<IdentityUserPasskey<string>>();
+        builder.Ignore<IdentityPasskeyData>();
+
         builder.Entity<IdentityUser>().ToTable("RemotelyUsers");
 
         builder.Entity<Organization>()
