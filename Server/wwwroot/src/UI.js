@@ -11,7 +11,8 @@ export var RequesterNameInput = document.getElementById("nameInput");
 export var StatusMessage = document.getElementById("statusMessage");
 export var ScreenViewer = document.getElementById("screenViewer");
 export var ScreenViewerWrapper = document.getElementById("screenViewerWrapper");
-export var Screen2DContext = ScreenViewer ? ScreenViewer.getContext("2d") : null;
+// alpha: false: экран всегда непрозрачный, композитору не нужно смешивать холст со страницей.
+export var Screen2DContext = ScreenViewer ? ScreenViewer.getContext("2d", { alpha: false }) : null;
 export var PopupMenus = document.querySelectorAll(".popup-menu");
 export var ConnectBox = document.getElementById("connectBox");
 export var ConnectHeader = document.getElementById("connectHeader");
