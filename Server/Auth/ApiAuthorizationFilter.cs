@@ -28,6 +28,9 @@ public class ApiAuthorizationFilter : IAsyncAuthorizationFilter
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error while authorizing API key.");
+            // Fail closed: без явного результата запрос считался бы авторизованным.
+            context.HttpContext.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            context.Result = new StatusCodeResult((int)HttpStatusCode.InternalServerError);
         }
     }
 

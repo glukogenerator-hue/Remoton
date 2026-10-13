@@ -72,7 +72,7 @@ export function Prompt(promptMessage: string): Promise<string> {
         modalDiv.classList.add("modal-prompt");
 
         var messageDiv = document.createElement("div");
-        messageDiv.innerHTML = promptMessage;
+        messageDiv.textContent = promptMessage;
 
         var responseInput = document.createElement("input");
 
@@ -119,7 +119,7 @@ export function SetStatusMessage(message: string) {
 export function ShowToast(message: string) {
     var messageDiv = document.createElement("div");
     messageDiv.classList.add("toast-message");
-    messageDiv.innerHTML = message;
+    messageDiv.textContent = message;
     ToastsWrapper.appendChild(messageDiv);
     window.setTimeout(() => {
         messageDiv.remove();

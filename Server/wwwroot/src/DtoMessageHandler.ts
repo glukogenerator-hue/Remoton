@@ -45,8 +45,10 @@ export class DtoMessageHandler {
                 break;
             case DtoType.File:
                 this.HandleFile(wrapper);
+                break;
             case DtoType.SessionMetrics:
                 await this.HandleSessionMetrics(wrapper);
+                break;
             default:
                 break;
         }
