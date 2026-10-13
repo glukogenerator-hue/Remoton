@@ -250,20 +250,20 @@ public partial class DevicesFrame : AuthComponentBase
         {
             var device = message.Device;
 
-            var collections = new[] { _allDevices, _filteredDevices };
-
-            foreach (var collection in collections)
+            var index = _allDevices.FindIndex(x => x.ID == device.ID);
+            if (index > -1)
             {
-                var index = collection.FindIndex(x => x.ID == device.ID);
-                if (index > -1)
-                {
-                    collection[index] = device;
-                }
-                else
-                {
-                    collection.Add(device);
-                }
+                _allDevices[index] = device;
             }
+            else
+            {
+                _allDevices.Add(device);
+            }
+
+            // Отфильтрованный список не правим напрямую: раньше устройство добавлялось в него
+            // без проверки фильтров, и в выбранной группе появлялись устройства из других групп.
+            // Сбрасываем состояние фильтра, чтобы GetDisplayedDevices применил фильтры заново.
+            _lastFilterState = string.Empty;
 
             Debouncer.Debounce(
                    TimeSpan.FromSeconds(2),
