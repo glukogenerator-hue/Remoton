@@ -170,6 +170,8 @@ internal class ScreenCaster : IScreenCaster
 
         try
         {
+            var frameTimer = System.Diagnostics.Stopwatch.StartNew();
+
             while (!viewer.DisconnectRequested && viewer.IsResponsive && !_isWindowsSessionEnding)
             {
                 viewer.IncrementFpsCount();
@@ -181,6 +183,18 @@ internal class ScreenCaster : IScreenCaster
                     _logger.LogWarning(
                         "Viewer is behind on frames and did not catch up in time.");
                 }
+
+                // При перегрузке канала (качество снижено) ограничиваем частоту кадров.
+                var minFrameInterval = viewer.MinFrameInterval;
+                if (minFrameInterval > TimeSpan.Zero)
+                {
+                    var remaining = minFrameInterval - frameTimer.Elapsed;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        await Task.Delay(remaining);
+                    }
+                }
+                frameTimer.Restart();
 
                 var result = viewer.Capturer.GetNextFrame();
 

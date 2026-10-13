@@ -19,6 +19,11 @@ public interface IViewer : IDisposable
     bool DisconnectRequested { get; set; }
     bool HasControl { get; set; }
     int ImageQuality { get; }
+    /// <summary>
+    /// Минимальный интервал между кадрами. Ноль, пока канал справляется;
+    /// при перегрузке ограничивает частоту кадров.
+    /// </summary>
+    TimeSpan MinFrameInterval { get; }
     bool IsResponsive { get; }
     string Name { get; set; }
     TimeSpan RoundTripLatency { get; }
@@ -44,6 +49,19 @@ public interface IViewer : IDisposable
 public class Viewer : IViewer
 {
     public const int DefaultQuality = 80;
+    public const int MinQuality = 35;
+
+    // Задержка подтверждения кадров (отправленный минус подтверждённый), при которой считаем канал перегруженным.
+    private static readonly TimeSpan CongestedLag = TimeSpan.FromMilliseconds(300);
+    // Задержка, ниже которой канал считаем свободным и возвращаем качество.
+    private static readonly TimeSpan HealthyLag = TimeSpan.FromMilliseconds(120);
+    private const int CongestedFrameCount = 6;
+    private const int QualityDecreaseStep = 10;
+    private const int QualityIncreaseStep = 4;
+    private static readonly TimeSpan QualityDecreaseInterval = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan QualityIncreaseInterval = TimeSpan.FromMilliseconds(400);
+    // При сниженном качестве ограничиваем частоту кадров примерно 30 FPS.
+    private static readonly TimeSpan ThrottledFrameInterval = TimeSpan.FromMilliseconds(33);
 
     private readonly IAudioCapturer _audioCapturer;
     private readonly IClipboardService _clipboardService;
@@ -56,6 +74,7 @@ public class Viewer : IViewer
     private volatile int _framesSentSinceLastReceipt;
     private DateTimeOffset _lastFrameReceived = DateTimeOffset.Now;
     private DateTimeOffset _lastFrameSent = DateTimeOffset.Now;
+    private DateTimeOffset _lastQualityChange = DateTimeOffset.MinValue;
     private int _pingFailures;
 
     public Viewer(
@@ -94,6 +113,7 @@ public class Viewer : IViewer
     }
     public bool HasControl { get; set; } = true;
     public int ImageQuality { get; private set; } = DefaultQuality;
+    public TimeSpan MinFrameInterval => ImageQuality < DefaultQuality ? ThrottledFrameInterval : TimeSpan.Zero;
     public bool IsResponsive { get; private set; } = true;
     public string Name { get; set; } = string.Empty;
     public TimeSpan RoundTripLatency { get; private set; }
@@ -106,12 +126,35 @@ public class Viewer : IViewer
         _sentFrames.Enqueue(sentFrame);
     }
 
+    /// <summary>
+    /// Подстраивает качество JPEG под скорость, с которой зритель подтверждает кадры.
+    /// Задержка подтверждения (отправленный минус подтверждённый кадр) показывает, что канал
+    /// или браузер не успевают: качество снижается быстро, возвращается медленно.
+    /// </summary>
     public Task ApplyAutoQuality()
     {
-        if (ImageQuality < DefaultQuality)
+        var now = _systemTime.Now;
+        var lag = _lastFrameSent - _lastFrameReceived;
+        var unacknowledged = _framesSentSinceLastReceipt;
+        var sinceLastChange = now - _lastQualityChange;
+
+        if (lag > CongestedLag || unacknowledged >= CongestedFrameCount)
         {
-            ImageQuality = Math.Min(DefaultQuality, ImageQuality + 2);
+            if (ImageQuality > MinQuality && sinceLastChange >= QualityDecreaseInterval)
+            {
+                ImageQuality = Math.Max(MinQuality, ImageQuality - QualityDecreaseStep);
+                _lastQualityChange = now;
+            }
         }
+        else if (lag < HealthyLag && unacknowledged <= 1)
+        {
+            if (ImageQuality < DefaultQuality && sinceLastChange >= QualityIncreaseInterval)
+            {
+                ImageQuality = Math.Min(DefaultQuality, ImageQuality + QualityIncreaseStep);
+                _lastQualityChange = now;
+            }
+        }
+
         return Task.CompletedTask;
     }
 
@@ -334,7 +377,8 @@ public class Viewer : IViewer
         }
         else if (_sentFrames.Count == 1)
         {
-            CurrentMbps = _sentFrames.First().FrameSize / 1024 / 1024 * 8;
+            // Деление в double: целочисленное давало 0 для любого кадра меньше 1 МБ.
+            CurrentMbps = (double)_sentFrames.First().FrameSize / 1024 / 1024 * 8;
         }
         else
         {
