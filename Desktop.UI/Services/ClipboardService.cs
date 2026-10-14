@@ -45,14 +45,26 @@ public class ClipboardService : IClipboardService
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(clipboardText))
+            // Тот же текст не должен вернуться к зрителю как «изменение буфера».
+            ClipboardText = clipboardText ?? string.Empty;
+
+            await _dispatcher.InvokeAsync(async () =>
             {
-                await _dispatcher.Clipboard.ClearAsync();
-            }
-            else
-            {
-                await _dispatcher.Clipboard.SetTextAsync(clipboardText);
-            }
+                var clipboard = _dispatcher.Clipboard;
+                if (clipboard is null)
+                {
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(clipboardText))
+                {
+                    await clipboard.ClearAsync();
+                }
+                else
+                {
+                    await Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, clipboardText);
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -68,16 +80,20 @@ public class ClipboardService : IClipboardService
         {
             try
             {
-                if (_dispatcher?.Clipboard is not null)
+                // Буфер Avalonia нужно читать в UI-потоке. Из фонового потока чтение иногда
+                // падало или возвращало null, из-за чего текст «иногда» не доходил до зрителя.
+                var currentText = await _dispatcher.InvokeAsync<string?>(async () =>
                 {
-                    var currentText = await Avalonia.Input.Platform.ClipboardExtensions
-                        .TryGetTextAsync(_dispatcher.Clipboard);
+                    var clipboard = _dispatcher.Clipboard;
+                    return clipboard is null ?
+                        null :
+                        await Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+                });
 
-                    if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
-                    {
-                        ClipboardText = currentText;
-                        ClipboardTextChanged?.Invoke(this, ClipboardText);
-                    }
+                if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
+                {
+                    ClipboardText = currentText;
+                    ClipboardTextChanged?.Invoke(this, ClipboardText);
                 }
             }
             catch (OperationCanceledException)
