@@ -183,7 +183,8 @@ public class DesktopHub : Hub<IDesktopHubClient>
     {
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            // 5 с было слишком мало: пинг идёт по тому же соединению, что и видео, и стоит в очереди за кадрами.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var response = await _viewerHub.Clients.Client(viewerConnectionId).PingViewer(cts.Token);
             return Result.Ok(response);
         }

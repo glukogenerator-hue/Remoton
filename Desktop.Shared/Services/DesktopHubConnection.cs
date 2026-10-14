@@ -408,6 +408,12 @@ public class DesktopHubConnection : IDesktopHubConnection, IDesktopHubClient
                 .AddMessagePackProtocol()
                 .WithAutomaticReconnect(new RetryPolicy())
                 .Build();
+
+            // Окно «живости». По умолчанию ServerTimeout 30 с: если от сервера 30 с ничего не пришло
+            // (канал занят видео), клиент сам рвёт соединение. Должно быть не меньше удвоенного KeepAliveInterval.
+            connection.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            connection.ServerTimeout = TimeSpan.FromSeconds(120);
+
             return Result.Ok(connection);
         }
         catch (Exception ex)
