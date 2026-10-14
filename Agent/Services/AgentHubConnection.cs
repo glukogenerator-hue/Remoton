@@ -142,6 +142,10 @@ public class AgentHubConnection : IAgentHubConnection, IDisposable
                     .AddMessagePackProtocol()
                     .Build();
 
+                // Окно «живости»: ServerTimeout по умолчанию 30 с, на занятом канале этого мало.
+                _hubConnection.KeepAliveInterval = TimeSpan.FromSeconds(15);
+                _hubConnection.ServerTimeout = TimeSpan.FromSeconds(120);
+
                 RegisterMessageHandlers();
 
                 _hubConnection.Reconnected += HubConnection_Reconnected;

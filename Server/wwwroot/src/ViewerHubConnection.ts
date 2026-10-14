@@ -35,6 +35,11 @@ export class ViewerHubConnection {
             .configureLogging(signalR.LogLevel.Information)
             .build();
 
+        // Окно «живости». По умолчанию браузер закрывает соединение, если от сервера 30 с ничего не пришло.
+        // При занятом канале и тяжёлой отрисовке видео этого мало. Должно быть не меньше удвоенного keep-alive.
+        this.Connection.keepAliveIntervalInMilliseconds = 15000;
+        this.Connection.serverTimeoutInMilliseconds = 120000;
+
         this.ApplyMessageHandlers(this.Connection);
 
         this.Connection.start().then(async () => {

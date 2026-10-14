@@ -194,6 +194,12 @@ services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
     options.MaximumReceiveMessageSize = 100_000;
+
+    // Окно «живости» соединения. Значения по умолчанию (ClientTimeout 30 с) слишком жёсткие:
+    // на загруженном канале или при нагруженном браузере клиент не успевает ответить, и сеанс закрывается.
+    // ClientTimeoutInterval должен быть не меньше удвоенного KeepAliveInterval.
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(120);
 })
     .AddJsonProtocol(options =>
     {

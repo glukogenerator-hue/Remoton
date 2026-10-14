@@ -51,6 +51,9 @@ public class Viewer : IViewer
     public const int DefaultQuality = 80;
     public const int MinQuality = 35;
 
+    // Сколько подряд пропущенных пингов зрителя терпим, прежде чем считать его неотвечающим.
+    private const int MaxPingFailures = 12;
+
     // Задержка подтверждения кадров (отправленный минус подтверждённый), при которой считаем канал перегруженным.
     private static readonly TimeSpan CongestedLag = TimeSpan.FromMilliseconds(300);
     // Задержка, ниже которой канал считаем свободным и возвращаем качество.
@@ -360,7 +363,9 @@ public class Viewer : IViewer
         else
         {
             _pingFailures++;
-            if (_pingFailures > 3)
+            // Раньше сеанс закрывался уже после 4 пропущенных пингов (около 20 с). Пинг идёт по тому же
+            // соединению, что и видео, и на загруженном канале легко опаздывает, поэтому допуск шире.
+            if (_pingFailures > MaxPingFailures)
             {
                 IsResponsive = false;
                 _logger.LogWarning("Failed to check roundtrip latency: {reason}", latencyResult.Reason);
