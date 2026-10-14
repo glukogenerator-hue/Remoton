@@ -637,6 +637,15 @@ public class KeyboardMouseInputWin(
             }
         }
 
+        // Консоли (cmd, PowerShell, Windows Terminal), в том числе от администратора, не принимают
+        // Unicode-события и плохо определяют раскладку окна. Как реальная клавиатура, шлём
+        // физическую клавишу: какой символ получится, решает раскладка консоли.
+        if (IsConsoleWindowFocused() && TryConvertCodeToVirtualKey(code, out var consoleKey))
+        {
+            resolved = new SentKey(consoleKey, null);
+            return true;
+        }
+
         // Обычный ввод. Если символ набирается клавишей раскладки окна, шлём обычное нажатие:
         // консоли (в том числе запущенные от администратора) и часть программ плохо принимают
         // Unicode-события (VK_PACKET). Unicode остаётся для символов, которых в раскладке нет,
@@ -668,6 +677,29 @@ public class KeyboardMouseInputWin(
         var window = GetForegroundWindow();
         var threadId = window == nint.Zero ? 0 : GetWindowThreadProcessId(window, out _);
         return GetKeyboardLayout(threadId);
+    }
+
+    /// <summary>
+    /// Сейчас в фокусе консольное окно: классическая консоль (conhost) или Windows Terminal.
+    /// </summary>
+    private static bool IsConsoleWindowFocused()
+    {
+        var window = GetForegroundWindow();
+        if (window == nint.Zero)
+        {
+            return false;
+        }
+
+        var className = new System.Text.StringBuilder(256);
+        if (GetClassName(window, className, className.Capacity) == 0)
+        {
+            return false;
+        }
+
+        return className.ToString() is
+            "ConsoleWindowClass" or
+            "CASCADIA_HOSTING_WINDOW_CLASS" or
+            "PseudoConsoleWindow";
     }
 
     private bool IsShiftPressedOnHost()
