@@ -33,11 +33,18 @@ export function TryComplete(wrapper) {
     if (!wrapper.IsLastChunk) {
         return;
     }
-    const buffers = Chunks[wrapper.InstanceId]
+    const parts = Chunks[wrapper.InstanceId]
         .sort((a, b) => a.SequenceId - b.SequenceId)
-        .map(x => x.DtoChunk)
-        .reduce((prev, cur) => new Uint8Array([...prev, ...cur]));
+        .map(x => x.DtoChunk);
     delete Chunks[wrapper.InstanceId];
+    // Один буфер нужного размера. Прежний reduce с копированием на каждом шаге давал
+    // квадратичную сложность и падал с RangeError на больших сообщениях.
+    const buffers = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+        buffers.set(part, offset);
+        offset += part.length;
+    }
     var decoded = MsgPack.decode(buffers);
     return decoded;
 }

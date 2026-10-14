@@ -94,7 +94,8 @@ public class ExpiringTokenFilter : ActionFilterAttribute, IAsyncAuthorizationFil
             if (_expiringTokenService.TryGetExpiration(expiringToken.ToString(), out var expiration) &&
                 expiration > Time.Now)
             {
-                _logger.LogDebug("Expiring token authorized.  Token: {token}.  Expiration: {expiration}", expiringToken, expiration);
+                // Сам токен в журнал не пишем: это секрет, дающий доступ.
+                _logger.LogDebug("Expiring token authorized.  Expiration: {expiration}", expiration);
                 return;
             }
         }
