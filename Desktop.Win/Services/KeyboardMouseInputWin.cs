@@ -628,8 +628,8 @@ public class KeyboardMouseInputWin(
                 return true;
             }
 
-            // Старый клиент без code: пробуем найти клавишу в раскладке хоста.
-            var scan = VkKeyScanEx(character, GetKeyboardLayout(0));
+            // Старый клиент без code: пробуем найти клавишу в раскладке окна, куда идёт ввод.
+            var scan = VkKeyScanEx(character, GetForegroundKeyboardLayout());
             if (scan != -1)
             {
                 resolved = new SentKey((VirtualKey)(scan & 0xFF), null);
@@ -637,8 +637,81 @@ public class KeyboardMouseInputWin(
             }
         }
 
+        // Консоли (cmd, PowerShell, Windows Terminal), в том числе от администратора, не принимают
+        // Unicode-события и плохо определяют раскладку окна. Как реальная клавиатура, шлём
+        // физическую клавишу: какой символ получится, решает раскладка консоли.
+        if (IsConsoleWindowFocused() && TryConvertCodeToVirtualKey(code, out var consoleKey))
+        {
+            resolved = new SentKey(consoleKey, null);
+            return true;
+        }
+
+        // Обычный ввод. Если символ набирается клавишей раскладки окна, шлём обычное нажатие:
+        // консоли (в том числе запущенные от администратора) и часть программ плохо принимают
+        // Unicode-события (VK_PACKET). Unicode остаётся для символов, которых в раскладке нет,
+        // например русских букв при английской раскладке на хосте.
+        var keyScan = VkKeyScanEx(character, GetForegroundKeyboardLayout());
+        if (keyScan != -1)
+        {
+            var modifiers = (keyScan >> 8) & 0xFF;
+            var needsShift = (modifiers & 1) != 0;
+            var needsCtrlOrAlt = (modifiers & 6) != 0; // AltGr и подобные
+            // Shift на хосте нажимается отдельным событием клиента. Если регистр не совпадает с тем,
+            // что даст клавиша при текущем Shift (например, включён Caps Lock на клиенте), точнее Unicode.
+            if (!needsCtrlOrAlt && needsShift == IsShiftPressedOnHost())
+            {
+                resolved = new SentKey((VirtualKey)(keyScan & 0xFF), null);
+                return true;
+            }
+        }
+
         resolved = new SentKey(null, character);
         return true;
+    }
+
+    /// <summary>
+    /// Раскладка клавиатуры окна, которое сейчас получит ввод.
+    /// </summary>
+    private static nint GetForegroundKeyboardLayout()
+    {
+        var window = GetForegroundWindow();
+        var threadId = window == nint.Zero ? 0 : GetWindowThreadProcessId(window, out _);
+        return GetKeyboardLayout(threadId);
+    }
+
+    /// <summary>
+    /// Сейчас в фокусе консольное окно: классическая консоль (conhost) или Windows Terminal.
+    /// </summary>
+    private static bool IsConsoleWindowFocused()
+    {
+        var window = GetForegroundWindow();
+        if (window == nint.Zero)
+        {
+            return false;
+        }
+
+        var className = new System.Text.StringBuilder(256);
+        if (GetClassName(window, className, className.Capacity) == 0)
+        {
+            return false;
+        }
+
+        return className.ToString() is
+            "ConsoleWindowClass" or
+            "CASCADIA_HOSTING_WINDOW_CLASS" or
+            "PseudoConsoleWindow";
+    }
+
+    private bool IsShiftPressedOnHost()
+    {
+        foreach (var sent in _pressedKeys.Values)
+        {
+            if (sent.Vk is VirtualKey.SHIFT or VirtualKey.LSHIFT or VirtualKey.RSHIFT)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private bool TryCreateKeyInput(string key, string? code, bool isPressed, out INPUT input)

@@ -1343,6 +1343,15 @@ public static class User32
     [DllImport("user32.dll")]
     public static extern nint GetKeyboardLayout(uint threadId = 0);
 
+    [DllImport("user32.dll")]
+    public static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int GetClassName(nint hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetUserObjectInformationW(nint hObj, int nIndex,
          [Out] byte[] pvInfo, uint nLength, out uint lpnLengthNeeded);
