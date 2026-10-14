@@ -1285,7 +1285,9 @@ public static class User32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(nint hWnd);
 
-    [DllImport("user32.dll")]
+    // SetLastError нужен, иначе Marshal.GetLastPInvokeError() в журнале агента показывает мусор
+    // и скрывает причину отказа (например, 5 = ACCESS_DENIED при вводе в окно с более высокими правами).
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, [MarshalAs(UnmanagedType.LPArray), In] INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll", SetLastError = false)]
