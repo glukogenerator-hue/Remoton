@@ -23,7 +23,9 @@ public class ClipboardService : IClipboardService
 
     public void BeginWatching()
     {
-        if (_watcherTask?.Status == TaskStatus.Running)
+        // Status == Running для async-задач ненадёжен (может быть WaitingForActivation и т. п.),
+        // из-за чего можно было запустить несколько наблюдателей.
+        if (_watcherTask is { IsCompleted: false })
         {
             return;
         }
@@ -66,21 +68,35 @@ public class ClipboardService : IClipboardService
         {
             try
             {
-                if (_dispatcher?.Clipboard is null)
+                if (_dispatcher?.Clipboard is not null)
                 {
-                    continue;
-                }
+                    var currentText = await Avalonia.Input.Platform.ClipboardExtensions
+                        .TryGetTextAsync(_dispatcher.Clipboard);
 
-                var currentText = await _dispatcher.Clipboard.GetTextAsync();
-                if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
-                {
-                    ClipboardText = currentText;
-                    ClipboardTextChanged?.Invoke(this, ClipboardText);
+                    if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
+                    {
+                        ClipboardText = currentText;
+                        ClipboardTextChanged?.Invoke(this, ClipboardText);
+                    }
                 }
             }
-            finally
+            catch (OperationCanceledException)
             {
-                Thread.Sleep(500);
+                break;
+            }
+            catch (Exception ex)
+            {
+                // Буфер может быть занят другим процессом. Это не повод останавливать слежение навсегда.
+                _logger.LogWarning(ex, "Error while reading the clipboard.");
+            }
+
+            try
+            {
+                await Task.Delay(500, cancelToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
         }
     }

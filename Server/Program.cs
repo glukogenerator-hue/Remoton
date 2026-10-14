@@ -108,6 +108,8 @@ services.AddIdentityCore<RemotelyUser>(options =>
 {
     options.Stores.MaxLengthForKeys = 128;
     options.Password.RequireNonAlphanumeric = false;
+    // Только для новых и изменяемых паролей. Существующие пароли продолжают работать.
+    options.Password.RequiredLength = 8;
 })
     .AddEntityFrameworkStores<AppDb>()
     .AddSignInManager()
@@ -290,8 +292,13 @@ else
     }
 }
 
-app.UseSwagger();
-app.UseSwaggerUI();
+// Swagger раскрывает описание всего API, поэтому вне разработки он включается только явно
+// (Remotely_ApplicationOptions__EnableSwagger=true).
+if (app.Environment.IsDevelopment() || appOptions?.EnableSwagger == true)
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 ConfigureStaticFiles();
 
