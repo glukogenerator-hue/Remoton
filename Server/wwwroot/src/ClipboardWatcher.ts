@@ -5,6 +5,17 @@ export class ClipboardWatcher {
     ClipboardTimer: number;
     LastClipboardText: string;
     NewClipboardText: string;
+    private IsBusy = false;
+    private LastFailureToast = 0;
+
+    private ReportFailure() {
+        // Уведомляем не чаще раза в 30 секунд, чтобы не засыпать экран.
+        if (Date.now() - this.LastFailureToast < 30000) {
+            return;
+        }
+        this.LastFailureToast = Date.now();
+        ShowToast("Clipboard sync failed. Click the page and allow clipboard access.");
+    }
 
     async WatchClipboard() {
         if (!location.protocol.includes("https") &&
@@ -47,22 +58,39 @@ export class ClipboardWatcher {
         }
 
         this.ClipboardTimer = window.setInterval(async () => {
-            if (!document.hasFocus()) {
+            // Не запускаем новый тик, пока предыдущий не закончил (например, ждёт разрешения браузера).
+            if (this.IsBusy || !document.hasFocus()) {
                 return;
             }
 
-            if (this.NewClipboardText && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(this.NewClipboardText);
-                this.LastClipboardText = this.NewClipboardText;
-                this.NewClipboardText = null;
-                ShowToast("Clipboard updated.");
-                return;
-            }
+            this.IsBusy = true;
+            try {
+                if (this.NewClipboardText && navigator.clipboard.writeText) {
+                    const text = this.NewClipboardText;
+                    await navigator.clipboard.writeText(text);
+                    this.LastClipboardText = text;
+                    // Если за время записи пришёл более новый текст, его не затираем.
+                    if (this.NewClipboardText === text) {
+                        this.NewClipboardText = null;
+                    }
+                    ShowToast("Clipboard updated.");
+                    return;
+                }
 
-            var newText = await navigator.clipboard.readText();
-            if (this.LastClipboardText != newText) {
-                this.LastClipboardText = newText;
-                ViewerApp.MessageSender.SendTextTransfer(newText, false);
+                var newText = await navigator.clipboard.readText();
+                if (this.LastClipboardText != newText) {
+                    this.LastClipboardText = newText;
+                    ViewerApp.MessageSender.SendTextTransfer(newText, false);
+                }
+            }
+            catch (ex) {
+                // Браузер может отказать (страница потеряла фокус, не выдано разрешение).
+                // Текст остаётся в очереди и будет записан при следующей попытке, а не пропадёт молча.
+                console.warn("Clipboard sync failed.", ex);
+                this.ReportFailure();
+            }
+            finally {
+                this.IsBusy = false;
             }
         }, 500);
     }
