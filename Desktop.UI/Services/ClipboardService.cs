@@ -80,20 +80,26 @@ public class ClipboardService : IClipboardService
         {
             try
             {
-                // Буфер Avalonia нужно читать в UI-потоке. Из фонового потока чтение иногда
-                // падало или возвращало null, из-за чего текст «иногда» не доходил до зрителя.
-                var currentText = await _dispatcher.InvokeAsync<string?>(async () =>
+                // Пока главное окно не создано (Clipboard == null), UI ещё не запущен. Обращаться к
+                // Dispatcher.UIThread из фонового потока на этом этапе нельзя: диспетчер привязывается
+                // не к тому потоку, и окно клиента зависает при запуске. Просто ждём.
+                if (_dispatcher.Clipboard is not null)
                 {
-                    var clipboard = _dispatcher.Clipboard;
-                    return clipboard is null ?
-                        null :
-                        await Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
-                });
+                    // Буфер Avalonia нужно читать в UI-потоке. Из фонового потока чтение иногда
+                    // падало или возвращало null, из-за чего текст «иногда» не доходил до зрителя.
+                    var currentText = await _dispatcher.InvokeAsync<string?>(async () =>
+                    {
+                        var clipboard = _dispatcher.Clipboard;
+                        return clipboard is null ?
+                            null :
+                            await Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(clipboard);
+                    });
 
-                if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
-                {
-                    ClipboardText = currentText;
-                    ClipboardTextChanged?.Invoke(this, ClipboardText);
+                    if (!string.IsNullOrEmpty(currentText) && currentText != ClipboardText)
+                    {
+                        ClipboardText = currentText;
+                        ClipboardTextChanged?.Invoke(this, ClipboardText);
+                    }
                 }
             }
             catch (OperationCanceledException)
