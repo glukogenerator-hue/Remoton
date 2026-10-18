@@ -177,6 +177,18 @@ public class MainViewViewModel : BrandedViewModelBase, IMainViewViewModel
 
         StatusMessage = "Retrieving...";
 
+        // Адрес берём из того, что уже определено (встроенные данные, параметры запуска), а если его
+        // нет, подставляем наш адрес по умолчанию: пользователю не нужно вводить его вручную.
+        if (string.IsNullOrWhiteSpace(Host))
+        {
+            Host = _appState.Host;
+        }
+
+        if (string.IsNullOrWhiteSpace(Host))
+        {
+            Host = Remotely.Shared.AppConstants.DefaultServerUrl;
+        }
+
         while (string.IsNullOrWhiteSpace(Host))
         {
             Host = "https://";
