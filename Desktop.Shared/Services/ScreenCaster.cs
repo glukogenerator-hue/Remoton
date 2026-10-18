@@ -214,9 +214,12 @@ internal class ScreenCaster : IScreenCaster
 
                 viewer.Capturer.CaptureFullscreen = false;
 
-                using var croppedFrame = _imageHelper.CropBitmap(result.Value, diffArea);
-
-                var encodedImageBytes = _imageHelper.EncodeBitmap(croppedFrame, SKEncodedImageFormat.Jpeg, viewer.ImageQuality);
+                // Кодируем область кадра без промежуточной копии (раньше: Crop через canvas).
+                var encodedImageBytes = _imageHelper.EncodeRegion(
+                    result.Value,
+                    diffArea,
+                    SKEncodedImageFormat.Jpeg,
+                    viewer.ImageQuality);
 
                 if (encodedImageBytes.Length == 0)
                 {
@@ -225,19 +228,11 @@ internal class ScreenCaster : IScreenCaster
 
                 viewer.AppendSentFrame(new SentFrame(encodedImageBytes.Length, _systemTime.Now));
 
-                using var frameStream = _recycleStreams.GetStream();
-                using var writer = new BinaryWriter(frameStream);
-                writer.Write(encodedImageBytes.Length);
-                writer.Write(diffArea.Left);
-                writer.Write(diffArea.Top);
-                writer.Write(diffArea.Width);
-                writer.Write(diffArea.Height);
-                writer.Write(DateTimeOffset.Now.ToUnixTimeMilliseconds());
-                writer.Write(encodedImageBytes);
-
-                frameStream.Seek(0, SeekOrigin.Begin);
-
-                foreach (var chunk in frameStream.ToArray().Chunk(50_000))
+                // Заголовок и изображение режутся на чанки за одну копию (раньше: поток, ToArray, Chunk).
+                foreach (var chunk in FramePacker.Pack(
+                    encodedImageBytes,
+                    diffArea,
+                    DateTimeOffset.Now.ToUnixTimeMilliseconds()))
                 {
                     yield return chunk;
                 }

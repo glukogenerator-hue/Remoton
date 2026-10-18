@@ -312,6 +312,45 @@ public class ScreenCapturerWin : IScreenCapturer
             using Texture2D screenTexture2D = screenResource.QueryInterface<Texture2D>();
             device.ImmediateContext.CopyResource(screenTexture2D, texture2D);
             var dataBox = device.ImmediateContext.MapSubresource(texture2D, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
+
+            // Быстрый путь для экранов без поворота: копируем кадр из памяти видеокарты сразу в SKBitmap.
+            // Раньше кадр копировался в GDI Bitmap, а потом ещё раз в SKBitmap (две полные копии и два
+            // выделения по 8 МБ на кадр 1080p).
+            if (dxOutput.Rotation is DisplayModeRotation.Unspecified or DisplayModeRotation.Identity)
+            {
+                var skBitmap = new SKBitmap(new SKImageInfo(
+                    bounds.Width,
+                    bounds.Height,
+                    SKColorType.Bgra8888,
+                    SKAlphaType.Premul));
+
+                try
+                {
+                    var source = dataBox.DataPointer;
+                    var destination = skBitmap.GetPixels();
+                    var destinationStride = skBitmap.RowBytes;
+                    for (var y = 0; y < bounds.Height; y++)
+                    {
+                        Utilities.CopyMemory(destination, source, bounds.Width * 4);
+                        source = nint.Add(source, dataBox.RowPitch);
+                        destination = nint.Add(destination, destinationStride);
+                    }
+                }
+                catch
+                {
+                    skBitmap.Dispose();
+                    throw;
+                }
+                finally
+                {
+                    device.ImmediateContext.UnmapSubresource(texture2D, 0);
+                    screenResource?.Dispose();
+                }
+
+                IsGpuAccelerated = true;
+                return DxCaptureResult.Ok(skBitmap, result);
+            }
+
             using var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
             var bitmapData = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, bitmap.PixelFormat);
             var dataBoxPointer = dataBox.DataPointer;
