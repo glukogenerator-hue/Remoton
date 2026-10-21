@@ -55,6 +55,7 @@ public class ScreenCapturerWin : IScreenCapturer
     private readonly object _screenBoundsLock = new();
     private SKBitmap? _currentFrame;
     private bool _needsInit;
+    private DateTime _lastInitAttempt = DateTime.MinValue;
     private SKBitmap? _previousFrame;
 
     public ScreenCapturerWin(
@@ -148,13 +149,27 @@ public class ScreenCapturerWin : IScreenCapturer
                     return Result.Fail<SKBitmap>($"Failed to switch to input desktop. Last Win32 error code: {errCode}");
                 }
 
-                if (_needsInit)
+                // Пока драйвер видеокарты переустанавливается, пересоздание может падать снова и снова,
+                // поэтому пробуем не чаще раза в полсекунды. Между попытками кадры идут через GDI.
+                if (_needsInit && DateTime.UtcNow - _lastInitAttempt >= TimeSpan.FromMilliseconds(500))
                 {
+                    _lastInitAttempt = DateTime.UtcNow;
                     _logger.LogWarning("Init needed in GetNextFrame.");
                     Init();
                 }
 
                 var result = GetDirectXFrame();
+
+                // Обновление драйвера, смена режима, переключение GPU: дублирование экрана становится
+                // недействительным. Раньше такие ошибки молча уводили захват на медленный GDI навсегда,
+                // и картинка могла зависнуть. Теперь пересоздаём DirectX.
+                if (!result.IsSuccess && IsDuplicationLost(result.DxResult))
+                {
+                    _logger.LogWarning(
+                        "Desktop duplication was lost ({code}).  Re-initializing capture.",
+                        result.DxResult?.Code);
+                    _needsInit = true;
+                }
 
                 if (result.IsSuccess && !result.HadChanges)
                 {
@@ -389,6 +404,8 @@ public class ScreenCapturerWin : IScreenCapturer
         {
             _logger.LogError(ex, "Error while getting DirectX frame.");
             IsGpuAccelerated = false;
+            // Любой сбой в DirectX-пути: пересоздаём захват (не чаще раза в полсекунды).
+            _needsInit = true;
         }
         finally
         {
@@ -400,6 +417,20 @@ public class ScreenCapturerWin : IScreenCapturer
         }
 
         return DxCaptureResult.Fail("Failed to get DirectX frame.");
+    }
+
+    private static bool IsDuplicationLost(SharpDX.Result? dxResult)
+    {
+        if (dxResult is not { } value)
+        {
+            return false;
+        }
+
+        var code = value.Code;
+        return code == SharpDX.DXGI.ResultCode.AccessLost.Code ||
+            code == SharpDX.DXGI.ResultCode.DeviceRemoved.Code ||
+            code == SharpDX.DXGI.ResultCode.DeviceReset.Code ||
+            code == SharpDX.DXGI.ResultCode.InvalidCall.Code;
     }
 
     private Task HandleDisplaySettingsChanged(object subscriber, DisplaySettingsChangedMessage message)

@@ -23,35 +23,60 @@ export class ViewerHubConnection {
     Connection: HubConnection;
     PartialCaptureFrames: Uint8Array[] = [];
 
+    // Автоматическое переподключение после обрыва (сеть пропала, VPN переподключился, сервер перезапущен).
+    private ReconnectAttempts = 0;
+    private ReconnectTimer: number;
+    // Установлен, если сеанс закрыт намеренно (отказ, сеанс остановлен, ошибка авторизации): повторять не нужно.
+    private NoReconnect = false;
+    private static readonly MaxReconnectAttempts = 12;
+
 
     Connect() {
+        window.clearTimeout(this.ReconnectTimer);
+
         if (this.Connection) {
             this.Connection.stop();
         }
 
-        this.Connection = new signalR.HubConnectionBuilder()
+        this.NoReconnect = false;
+
+        const connection = new signalR.HubConnectionBuilder()
             .withUrl("/hubs/viewer")
             .withHubProtocol(new signalR.protocols.msgpack.MessagePackHubProtocol())
             .configureLogging(signalR.LogLevel.Information)
             .build();
+        this.Connection = connection;
 
         // Окно «живости». По умолчанию браузер закрывает соединение, если от сервера 30 с ничего не пришло.
         // При занятом канале и тяжёлой отрисовке видео этого мало. Должно быть не меньше удвоенного keep-alive.
-        this.Connection.keepAliveIntervalInMilliseconds = 15000;
-        this.Connection.serverTimeoutInMilliseconds = 120000;
+        connection.keepAliveIntervalInMilliseconds = 15000;
+        connection.serverTimeoutInMilliseconds = 120000;
 
-        this.ApplyMessageHandlers(this.Connection);
+        this.ApplyMessageHandlers(connection);
 
-        this.Connection.start().then(async () => {
+        connection.start().then(async () => {
             this.SendScreenCastRequestToDevice();
         }).catch(err => {
             console.error(err.toString());
             console.log("Connection closed.");
-            UI.SetStatusMessage(`Connection error: ${err.message}`);
-            UI.ToggleConnectUI(true);
+            if (connection !== this.Connection) {
+                return;
+            }
+            // Не удалось подключиться (например, ещё нет сети после переподключения VPN): пробуем снова.
+            if (!this.ScheduleReconnect()) {
+                UI.SetStatusMessage(`Connection error: ${err.message}`);
+                UI.ToggleConnectUI(true);
+            }
         });
 
-        this.Connection.onclose(() => {
+        connection.onclose(() => {
+            // Закрытие старого соединения при замене новым не должно ничего сбрасывать.
+            if (connection !== this.Connection) {
+                return;
+            }
+            if (this.ScheduleReconnect()) {
+                return;
+            }
             if (!UI.StatusMessage.innerText) {
                 UI.SetStatusMessage("Connection closed.");
             }
@@ -59,6 +84,29 @@ export class ViewerHubConnection {
         });
 
         ViewerApp.ClipboardWatcher.WatchClipboard();
+    }
+
+    // Планирует повторное подключение с нарастающей паузой (2, 4, 8 ... до 30 с).
+    // Возвращает false, если повторять не нужно или попытки закончились.
+    private ScheduleReconnect(): boolean {
+        if (this.NoReconnect || !ViewerApp.SessionId) {
+            return false;
+        }
+
+        if (this.ReconnectAttempts >= ViewerHubConnection.MaxReconnectAttempts) {
+            UI.SetStatusMessage("Connection lost. Unable to reconnect.");
+            return false;
+        }
+
+        this.ReconnectAttempts++;
+        const delaySeconds = Math.min(30, Math.pow(2, this.ReconnectAttempts));
+        UI.SetStatusMessage(
+            `Connection lost. Reconnecting in ${delaySeconds} s (attempt ${this.ReconnectAttempts} of ${ViewerHubConnection.MaxReconnectAttempts})...`);
+        ShowToast("Connection lost. Reconnecting...");
+
+        window.clearTimeout(this.ReconnectTimer);
+        this.ReconnectTimer = window.setTimeout(() => this.Connect(), delaySeconds * 1000);
+        return true;
     }
 
     async ChangeWindowsSession(sessionID: number) {
@@ -121,10 +169,14 @@ export class ViewerHubConnection {
             ViewerApp.RequesterName);
 
         if (!result.IsSuccess) {
+            this.NoReconnect = true;
             this.Connection.stop();
             UI.SetStatusMessage(result.Reason);
             return;
         }
+
+        this.ReconnectAttempts = 0;
+        UI.SetStatusMessage("");
 
         const streamingState = new StreamingState();
         ProcessStream(streamingState);
@@ -172,6 +224,7 @@ export class ViewerHubConnection {
             UI.ConnectButton.innerText = "Connect";
             UI.SetStatusMessage("Connection failed or was denied.");
             ShowToast("Connection failed.  Please reconnect.");
+            this.NoReconnect = true;
             this.Connection.stop();
         });
         hubConnection.on("ReconnectFailed", () => {
@@ -179,10 +232,12 @@ export class ViewerHubConnection {
             UI.ConnectButton.innerText = "Connect";
             UI.SetStatusMessage("Unable to reconnect.");
             ShowToast("Unable to reconnect.");
+            this.NoReconnect = true;
             this.Connection.stop();
         });
         hubConnection.on("ConnectionRequestDenied", () => {
             UI.ConnectButton.innerText = "Connect";
+            this.NoReconnect = true;
             this.Connection.stop();
             UI.SetStatusMessage("Connection request denied.");
             ShowToast("Connection request denied.");
@@ -192,10 +247,12 @@ export class ViewerHubConnection {
             UI.ConnectButton.innerText = "Connect";
             UI.SetStatusMessage("The session was stopped by your partner.");
             ShowToast("Session ended");
+            this.NoReconnect = true;
             this.Connection.stop();
         });
         hubConnection.on("ScreenCasterDisconnected", () => {
             UI.SetStatusMessage("The host has disconnected.");
+            this.NoReconnect = true;
             this.Connection.stop();
         });
         hubConnection.on("RelaunchedScreenCasterReady", (newSessionId: string, newAccessKey: string) => {
