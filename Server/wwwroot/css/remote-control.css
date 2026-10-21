@@ -480,3 +480,29 @@ footer {
     grid-template-columns: 0 2fr 1fr;
   }
 }
+
+/* Постоянный индикатор качества канала в панели: задержка, FPS, скорость, качество картинки. */
+.quality-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-family: monospace;
+  font-size: 0.8em;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+
+.quality-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #8a8f91;
+  flex: none;
+}
+
+.quality-good .quality-dot { background-color: #2fb457; }
+.quality-warn .quality-dot { background-color: #e0b020; }
+.quality-bad .quality-dot { background-color: #e04a3a; }
+.quality-unknown .quality-dot { background-color: #8a8f91; }

@@ -67,4 +67,64 @@ public class DtoCompatibilityTests
         Assert.AreEqual("Enter", current.Key);
         Assert.IsNull(current.Code);
     }
+
+    // Точная копия SessionMetricsDto до добавления поля ImageQuality.
+    [DataContract]
+    public class LegacySessionMetricsDto
+    {
+        [DataMember(Name = "Mbps")]
+        public double Mbps { get; set; }
+
+        [DataMember(Name = "Fps")]
+        public double Fps { get; set; }
+
+        [DataMember(Name = "RoundTripLatency")]
+        public double RoundTripLatency { get; set; }
+
+        [DataMember(Name = "IsGpuAccelerated")]
+        public bool IsGpuAccelerated { get; set; }
+    }
+
+    [TestMethod]
+    public void SessionMetrics_RoundTripsWithImageQuality()
+    {
+        var bytes = MessagePackSerializer.Serialize(new SessionMetricsDto(3.5, 24, 42, true, 65));
+
+        var current = MessagePackSerializer.Deserialize<SessionMetricsDto>(bytes);
+
+        Assert.AreEqual(3.5, current.Mbps);
+        Assert.AreEqual(24, current.Fps);
+        Assert.AreEqual(42, current.RoundTripLatency);
+        Assert.IsTrue(current.IsGpuAccelerated);
+        Assert.AreEqual(65, current.ImageQuality);
+    }
+
+    [TestMethod]
+    public void NewSessionMetrics_IsReadableByLegacyViewer()
+    {
+        var bytes = MessagePackSerializer.Serialize(new SessionMetricsDto(1.25, 10, 80, false, 40));
+
+        var legacy = MessagePackSerializer.Deserialize<LegacySessionMetricsDto>(bytes);
+
+        Assert.AreEqual(1.25, legacy.Mbps);
+        Assert.AreEqual(10, legacy.Fps);
+        Assert.AreEqual(80, legacy.RoundTripLatency);
+    }
+
+    [TestMethod]
+    public void LegacySessionMetrics_IsReadableByNewViewer_WithoutImageQuality()
+    {
+        var bytes = MessagePackSerializer.Serialize(new LegacySessionMetricsDto
+        {
+            Mbps = 2,
+            Fps = 30,
+            RoundTripLatency = 15,
+            IsGpuAccelerated = true
+        });
+
+        var current = MessagePackSerializer.Deserialize<SessionMetricsDto>(bytes);
+
+        Assert.AreEqual(30, current.Fps);
+        Assert.AreEqual(0, current.ImageQuality);
+    }
 }

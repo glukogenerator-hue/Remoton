@@ -178,6 +178,7 @@ export interface SessionMetricsDto {
     Fps: number;
     RoundTripLatency: number;
     IsGpuAccelerated: boolean;
+    ImageQuality?: number;
 }
 
 export class TapDto {
