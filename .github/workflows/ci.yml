@@ -38,10 +38,11 @@ jobs:
       - name: Build
         run: dotnet build Remotely.sln --no-restore --configuration Release ${{ env.BUILD_ARGS }}
 
-      - name: Test (Shared.Tests, Server.Tests)
+      - name: Test (Shared.Tests, Server.Tests, Desktop.Shared.Tests)
         run: |
           dotnet test Tests/Shared.Tests/Shared.Tests.csproj --no-build --configuration Release ${{ env.BUILD_ARGS }}
           dotnet test Tests/Server.Tests/Server.Tests.csproj --no-build --configuration Release ${{ env.BUILD_ARGS }}
+          dotnet test Tests/Desktop.Shared.Tests/Desktop.Shared.Tests.csproj --no-build --configuration Release ${{ env.BUILD_ARGS }}
 
   audit:
     name: Аудит уязвимостей NuGet

@@ -214,32 +214,47 @@ internal class ScreenCaster : IScreenCaster
 
                 viewer.Capturer.CaptureFullscreen = false;
 
-                using var croppedFrame = _imageHelper.CropBitmap(result.Value, diffArea);
+                // Большая область (видео, прокрутка) делится на полосы, которые кодируются параллельно:
+                // кодирование целого кадра занимает десятки миллисекунд на одном ядре.
+                var strips = FrameStrips.Split(
+                    diffArea,
+                    FrameStrips.GetStripCount(diffArea, Environment.ProcessorCount));
+                var encodedStrips = new byte[strips.Length][];
+                var frame = result.Value;
+                var quality = viewer.ImageQuality;
 
-                var encodedImageBytes = _imageHelper.EncodeBitmap(croppedFrame, SKEncodedImageFormat.Jpeg, viewer.ImageQuality);
-
-                if (encodedImageBytes.Length == 0)
+                if (strips.Length == 1)
                 {
-                    continue;
+                    // Кодируем область без промежуточной копии (раньше: Crop через canvas).
+                    encodedStrips[0] = _imageHelper.EncodeRegion(frame, strips[0], SKEncodedImageFormat.Jpeg, quality);
+                }
+                else
+                {
+                    Parallel.For(0, strips.Length, i =>
+                    {
+                        encodedStrips[i] = _imageHelper.EncodeRegion(frame, strips[i], SKEncodedImageFormat.Jpeg, quality);
+                    });
                 }
 
-                viewer.AppendSentFrame(new SentFrame(encodedImageBytes.Length, _systemTime.Now));
-
-                using var frameStream = _recycleStreams.GetStream();
-                using var writer = new BinaryWriter(frameStream);
-                writer.Write(encodedImageBytes.Length);
-                writer.Write(diffArea.Left);
-                writer.Write(diffArea.Top);
-                writer.Write(diffArea.Width);
-                writer.Write(diffArea.Height);
-                writer.Write(DateTimeOffset.Now.ToUnixTimeMilliseconds());
-                writer.Write(encodedImageBytes);
-
-                frameStream.Seek(0, SeekOrigin.Begin);
-
-                foreach (var chunk in frameStream.ToArray().Chunk(50_000))
+                for (var i = 0; i < strips.Length; i++)
                 {
-                    yield return chunk;
+                    var encodedImageBytes = encodedStrips[i];
+
+                    if (encodedImageBytes.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    viewer.AppendSentFrame(new SentFrame(encodedImageBytes.Length, _systemTime.Now));
+
+                    // Заголовок и изображение режутся на чанки за одну копию (раньше: поток, ToArray, Chunk).
+                    foreach (var chunk in FramePacker.Pack(
+                        encodedImageBytes,
+                        strips[i],
+                        DateTimeOffset.Now.ToUnixTimeMilliseconds()))
+                    {
+                        yield return chunk;
+                    }
                 }
             }
         }
