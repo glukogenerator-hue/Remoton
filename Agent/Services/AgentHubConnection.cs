@@ -142,9 +142,10 @@ public class AgentHubConnection : IAgentHubConnection, IDisposable
                     .AddMessagePackProtocol()
                     .Build();
 
-                // Окно «живости»: ServerTimeout по умолчанию 30 с, на занятом канале этого мало.
-                _hubConnection.KeepAliveInterval = TimeSpan.FromSeconds(15);
-                _hubConnection.ServerTimeout = TimeSpan.FromSeconds(120);
+                // Должно быть согласовано с настройками AgentHub на сервере (KeepAlive 10 с, ClientTimeout 30 с):
+                // клиент шлёт пинг каждые 10 с и считает сервер недоступным, если 30 с ничего не пришло.
+                _hubConnection.KeepAliveInterval = TimeSpan.FromSeconds(10);
+                _hubConnection.ServerTimeout = TimeSpan.FromSeconds(30);
 
                 RegisterMessageHandlers();
 
@@ -585,21 +586,33 @@ public class AgentHubConnection : IAgentHubConnection, IDisposable
             return;
         }
 
-        _logger.LogInformation("Reconnected to server.");
-        await _updater.CheckForUpdates();
-
-        var device = await _deviceInfoService.CreateDevice(_connectionInfo.DeviceID, $"{_connectionInfo.OrganizationID}");
-
-        if (!await _hubConnection.InvokeAsync<bool>("DeviceCameOnline", device))
+        try
         {
-            await Connect();
-            return;
+            _logger.LogInformation("Reconnected to server.");
+
+            // Сначала возвращаем устройство в «сеть», потом проверяем обновления: сбой проверки
+            // раньше оставлял подключённого агента в статусе «не в сети».
+            var device = await _deviceInfoService.CreateDevice(_connectionInfo.DeviceID, $"{_connectionInfo.OrganizationID}");
+
+            if (!await _hubConnection.InvokeAsync<bool>("DeviceCameOnline", device))
+            {
+                await Connect();
+                return;
+            }
+
+            if (await CheckForServerMigration())
+            {
+                await Connect();
+                return;
+            }
+
+            await _updater.CheckForUpdates();
         }
-
-        if (await CheckForServerMigration())
+        catch (Exception ex)
         {
+            // Соединение живо, но регистрация не удалась: переподключаемся с нуля, а не остаёмся «невидимыми».
+            _logger.LogError(ex, "Error while handling reconnection.  Reconnecting from scratch.");
             await Connect();
-            return;
         }
     }
 

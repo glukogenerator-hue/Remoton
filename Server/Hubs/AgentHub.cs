@@ -292,7 +292,14 @@ public class AgentHub : Hub<IAgentHubClient>
     {
         try
         {
-            if (Device != null)
+            // Если агент уже переподключился, а это отключение старого соединения (оно обнаруживается
+            // по таймауту позже), устройство остаётся «в сети»: его держит новое соединение.
+            var hasNewerConnection =
+                Device != null &&
+                _serviceSessionCache.TryGetConnectionId(Device.ID, out var currentConnectionId) &&
+                currentConnectionId != Context.ConnectionId;
+
+            if (Device != null && !hasNewerConnection)
             {
                 _dataService.DeviceDisconnected(Device.ID);
 

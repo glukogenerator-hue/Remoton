@@ -1,4 +1,4 @@
-import {
+﻿import {
     AudioButton,
     ChangeScreenButton,
     PopupMenus,
@@ -765,6 +765,10 @@ export function ApplyInputHandlers() {
         // при русской раскладке e.key равен "ш".
         if (!e.ctrlKey || !e.shiftKey || e.code != "KeyI") {
             e.preventDefault();
+        }
+        // Вставка: сначала доставляем на хост актуальный буфер, потом саму клавишу.
+        if (((e.ctrlKey || e.metaKey) && e.code == "KeyV") || (e.shiftKey && e.code == "Insert")) {
+            await ViewerApp.ClipboardWatcher.SyncNow();
         }
         await ViewerApp.MessageSender.SendKeyDown(e.key, e.code);
     });
