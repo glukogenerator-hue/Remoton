@@ -363,7 +363,21 @@ void ConfigureStaticFiles()
     provider.Mappings[".appimage"] = "application/octet-stream";
     provider.Mappings[".zip"] = "application/octet-stream";
     provider.Mappings[".config"] = "application/octet-stream";
-    app.UseStaticFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        // Скрипты и стили веб-клиента без заголовка Cache-Control браузер кэширует по эвристике
+        // (от Last-Modified) и после обновления сервера держит старые файлы: страница новая,
+        // а скрипт старый, кнопки не работают. no-cache заставляет проверять ETag при каждой загрузке
+        // (если файл не менялся, сервер отвечает 304 без тела).
+        OnPrepareResponse = context =>
+        {
+            var path = context.Context.Request.Path;
+            if (path.StartsWithSegments("/src") || path.StartsWithSegments("/css"))
+            {
+                context.Context.Response.Headers.CacheControl = "no-cache";
+            }
+        }
+    });
     var contentPath = Path.Combine(app.Environment.WebRootPath, "Content");
 
     if (Directory.Exists(contentPath))
