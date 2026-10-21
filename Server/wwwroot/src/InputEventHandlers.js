@@ -213,6 +213,11 @@ export function ApplyInputHandlers() {
         }
         PhysicalKeysButton.classList.toggle("toggled");
         const on = PhysicalKeysButton.classList.contains("toggled");
+        PhysicalKeysButton.setAttribute("aria-pressed", on ? "true" : "false");
+        const label = document.getElementById("physicalKeysLabel");
+        if (label) {
+            label.textContent = on ? "Physical Keys: ON" : "Physical Keys: off";
+        }
         await ViewerApp.MessageSender.SendTogglePhysicalKeys(on);
         ShowToast(on ?
             "Physical keys: the receiving side's keyboard layout decides the characters." :
