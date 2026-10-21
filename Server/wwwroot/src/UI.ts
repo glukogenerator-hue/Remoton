@@ -24,6 +24,7 @@ export var ScreenSelectMenu = document.getElementById("screenSelectMenu") as HTM
 export var ChangeScreenButton = document.getElementById("changeScreenButton") as HTMLButtonElement;
 export var FitToScreenButton = document.getElementById("fitToScreenButton") as HTMLButtonElement;
 export var BlockInputButton = document.getElementById("blockInputButton") as HTMLButtonElement;
+export var PhysicalKeysButton = document.getElementById("physicalKeysButton") as HTMLButtonElement;
 export var DisconnectButton = document.getElementById("disconnectButton") as HTMLButtonElement;
 export var FileTransferInput = document.getElementById("fileTransferInput") as HTMLInputElement;
 export var FileTransferProgress = document.getElementById("fileTransferProgress") as HTMLProgressElement;

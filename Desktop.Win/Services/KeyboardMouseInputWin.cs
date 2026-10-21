@@ -19,6 +19,7 @@ public class KeyboardMouseInputWin(
     private readonly ConcurrentQueue<Action> _inputActions = new();
     private readonly AutoResetEvent _inputReadySignal = new(false);
     private volatile bool _inputBlocked;
+    private volatile bool _physicalKeys;
     private Thread? _inputProcessingThread;
 
     /// <summary>
@@ -345,6 +346,18 @@ public class KeyboardMouseInputWin(
         });
     }
 
+    /// <summary>
+    /// Режим «физические клавиши»: вместо символа всегда отправляется клавиша, на которую он нажат
+    /// в браузере (по KeyboardEvent.code), а какой символ получится, решает раскладка принимающей стороны.
+    /// Нужен там, где Unicode-ввод не принимается или ввод читается по скан-кодам: консоли виртуальных
+    /// машин (ESXi, VMware, Hyper-V), удалённые рабочие столы, игры.
+    /// </summary>
+    public void SetPhysicalKeys(bool toggleOn)
+    {
+        _physicalKeys = toggleOn;
+        _logger.LogInformation("Physical keys mode set to {toggleOn}.", toggleOn);
+    }
+
     public void ToggleBlockInput(bool toggleOn)
     {
         TryOnInputDesktop(() =>
@@ -619,6 +632,12 @@ public class KeyboardMouseInputWin(
         }
 
         var character = key[0];
+
+        if (_physicalKeys && TryConvertCodeToVirtualKey(code, out var physicalOnly))
+        {
+            resolved = new SentKey(physicalOnly, null);
+            return true;
+        }
 
         if (IsShortcutActive())
         {

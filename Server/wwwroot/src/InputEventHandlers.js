@@ -1,4 +1,4 @@
-import { AudioButton, ChangeScreenButton, ScreenSelectMenu, ClipboardTransferButton, ClipboardTransferMenu, TypeClipboardButton, ConnectButton, CtrlAltDelButton, DisconnectButton, FileTransferButton, FileTransferInput, FitToScreenButton, ScreenViewer, BlockInputButton, InviteButton, KeyboardButton, TouchKeyboardInput, MenuFrame, MenuButton, ScreenViewerWrapper, WindowsSessionSelect, FileTransferMenu, FileUploadButtton, FileDownloadButton, ViewOnlyButton, FullScreenButton, RequesterNameInput, SessionIDInput, ConnectForm, CloseAllPopupMenus, ExtrasMenu, ExtrasMenuButton, WindowsSessionMenuButton, WindowsSessionMenu, MetricsButton, MetricsFrame, SetStatusMessage, BetaPillPullDown, } from "./UI.js";
+import { AudioButton, ChangeScreenButton, ScreenSelectMenu, ClipboardTransferButton, ClipboardTransferMenu, TypeClipboardButton, ConnectButton, CtrlAltDelButton, DisconnectButton, FileTransferButton, FileTransferInput, FitToScreenButton, ScreenViewer, BlockInputButton, PhysicalKeysButton, InviteButton, KeyboardButton, TouchKeyboardInput, MenuFrame, MenuButton, ScreenViewerWrapper, WindowsSessionSelect, FileTransferMenu, FileUploadButtton, FileDownloadButton, ViewOnlyButton, FullScreenButton, RequesterNameInput, SessionIDInput, ConnectForm, CloseAllPopupMenus, ExtrasMenu, ExtrasMenuButton, WindowsSessionMenuButton, WindowsSessionMenu, MetricsButton, MetricsFrame, SetStatusMessage, BetaPillPullDown, } from "./UI.js";
 import { Sound } from "./Sound.js";
 import { ViewerApp } from "./App.js";
 import { UploadFiles } from "./FileTransferService.js";
@@ -205,6 +205,18 @@ export function ApplyInputHandlers() {
         else {
             await ViewerApp.MessageSender.SendToggleBlockInput(false);
         }
+    });
+    PhysicalKeysButton.addEventListener("click", async (ev) => {
+        if (ViewerApp.ViewOnlyMode) {
+            ShowToast("View-only mode is enabled.");
+            return;
+        }
+        PhysicalKeysButton.classList.toggle("toggled");
+        const on = PhysicalKeysButton.classList.contains("toggled");
+        await ViewerApp.MessageSender.SendTogglePhysicalKeys(on);
+        ShowToast(on ?
+            "Physical keys: the receiving side's keyboard layout decides the characters." :
+            "Physical keys off: characters are typed as on your keyboard.");
     });
     InviteButton.addEventListener("click", (ev) => {
         var url = "";

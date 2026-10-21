@@ -1,5 +1,5 @@
 import { ViewerApp } from "./App.js";
-import { CtrlAltDelDto, KeyDownDto, KeyPressDto, KeyUpDto, MouseDownDto, MouseMoveDto, MouseUpDto, MouseWheelDto, SelectScreenDto, TapDto, ToggleAudioDto, ToggleBlockInputDto, TextTransferDto, FileDto, WindowsSessionsDto, EmptyDto, FrameReceivedDto } from "./Interfaces/Dtos.js";
+import { CtrlAltDelDto, KeyDownDto, KeyPressDto, KeyUpDto, MouseDownDto, MouseMoveDto, MouseUpDto, MouseWheelDto, SelectScreenDto, TapDto, ToggleAudioDto, ToggleBlockInputDto, TogglePhysicalKeysDto, TextTransferDto, FileDto, WindowsSessionsDto, EmptyDto, FrameReceivedDto } from "./Interfaces/Dtos.js";
 import { CreateGUID } from "./Utilities.js";
 import { FileTransferProgress } from "./UI.js";
 import { DtoType } from "./Enums/DtoType.js";
@@ -86,6 +86,10 @@ export class MessageSender {
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.ToggleAudio);
     }
     ;
+    async SendTogglePhysicalKeys(toggleOn) {
+        var dto = new TogglePhysicalKeysDto(toggleOn);
+        await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.TogglePhysicalKeys);
+    }
     async SendToggleBlockInput(toggleOn) {
         var dto = new ToggleBlockInputDto(toggleOn);
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.ToggleBlockInput);

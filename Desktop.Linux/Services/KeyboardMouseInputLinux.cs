@@ -181,6 +181,11 @@ public class KeyboardMouseInputLinux : IKeyboardMouseInput
         // Not implemented.
     }
 
+    public void SetPhysicalKeys(bool toggleOn)
+    {
+        // Not implemented.
+    }
+
     private string ConvertJavaScriptKeyToX11Key(string key)
     {
         var keySym = key switch

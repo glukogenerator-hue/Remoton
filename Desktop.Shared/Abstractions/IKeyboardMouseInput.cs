@@ -14,6 +14,7 @@ public interface IKeyboardMouseInput
     void SendMouseWheel(int deltaY);
     void SendText(string transferText);
     void ToggleBlockInput(bool toggleOn);
+    void SetPhysicalKeys(bool toggleOn);
     void SetKeyStatesUp();
     void SendMouseButtonAction(int button, ButtonAction buttonAction, double percentX, double percentY, IViewer viewer);
 }

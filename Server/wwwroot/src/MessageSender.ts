@@ -12,6 +12,7 @@ import {
     TapDto,
     ToggleAudioDto,
     ToggleBlockInputDto,
+    TogglePhysicalKeysDto,
     TextTransferDto,
     FileDto,
     WindowsSessionsDto,
@@ -117,6 +118,11 @@ export class MessageSender {
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.ToggleAudio);
 
     };
+    async SendTogglePhysicalKeys(toggleOn: boolean) {
+        var dto = new TogglePhysicalKeysDto(toggleOn);
+        await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.TogglePhysicalKeys);
+    }
+
     async SendToggleBlockInput(toggleOn: boolean) {
         var dto = new ToggleBlockInputDto(toggleOn);
         await ViewerApp.ViewerHubConnection.SendDtoToClient(dto, DtoType.ToggleBlockInput);

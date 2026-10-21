@@ -208,6 +208,15 @@ export class ToggleBlockInputDto {
 }
 
 
+export class TogglePhysicalKeysDto {
+    constructor(toggleOn: boolean) {
+        this.ToggleOn = toggleOn;
+    }
+
+    ToggleOn: boolean;
+}
+
+
 export class WindowsSessionsDto {
     
     WindowsSessions: Array<WindowsSession>;
