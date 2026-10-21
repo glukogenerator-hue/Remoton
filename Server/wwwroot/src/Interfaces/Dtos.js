@@ -88,6 +88,11 @@ export class ToggleBlockInputDto {
         this.ToggleOn = toggleOn;
     }
 }
+export class TogglePhysicalKeysDto {
+    constructor(toggleOn) {
+        this.ToggleOn = toggleOn;
+    }
+}
 export class WindowsSessionsDto {
 }
 //# sourceMappingURL=Dtos.js.map

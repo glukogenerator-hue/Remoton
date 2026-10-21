@@ -24,5 +24,6 @@ export var DtoType;
     DtoType[DtoType["FrameReceived"] = 25] = "FrameReceived";
     DtoType[DtoType["OpenFileTransferWindow"] = 27] = "OpenFileTransferWindow";
     DtoType[DtoType["SessionMetrics"] = 28] = "SessionMetrics";
+    DtoType[DtoType["TogglePhysicalKeys"] = 29] = "TogglePhysicalKeys";
 })(DtoType || (DtoType = {}));
 //# sourceMappingURL=DtoType.js.map

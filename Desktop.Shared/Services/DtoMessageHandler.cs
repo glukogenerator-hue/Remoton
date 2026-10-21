@@ -56,6 +56,7 @@ public class DtoMessageHandler : IDtoMessageHandler
                 case DtoType.KeyUp:
                 case DtoType.CtrlAltDel:
                 case DtoType.ToggleBlockInput:
+                case DtoType.TogglePhysicalKeys:
                 case DtoType.TextTransfer:
                 case DtoType.KeyPress:
                 case DtoType.SetKeyStatesUp:
@@ -104,6 +105,9 @@ public class DtoMessageHandler : IDtoMessageHandler
                     break;
                 case DtoType.ToggleBlockInput:
                     ToggleBlockInput(wrapper);
+                    break;
+                case DtoType.TogglePhysicalKeys:
+                    TogglePhysicalKeys(wrapper);
                     break;
                 case DtoType.TextTransfer:
                     await TransferText(wrapper);
@@ -318,6 +322,15 @@ public class DtoMessageHandler : IDtoMessageHandler
         }
 
         _audioCapturer.ToggleAudio(dto!.ToggleOn);
+    }
+
+    private void TogglePhysicalKeys(DtoWrapper wrapper)
+    {
+        if (!DtoChunker.TryComplete<TogglePhysicalKeysDto>(wrapper, out var dto))
+        {
+            return;
+        }
+        _keyboardMouseInput.SetPhysicalKeys(dto!.ToggleOn);
     }
 
     private void ToggleBlockInput(DtoWrapper wrapper)

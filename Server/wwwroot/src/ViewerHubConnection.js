@@ -134,6 +134,10 @@ export class ViewerHubConnection {
         }
         this.ReconnectAttempts = 0;
         UI.SetStatusMessage("");
+        // Режим «физические клавиши» живёт на хосте и сбрасывается при новом сеансе: восстанавливаем.
+        if (UI.PhysicalKeysButton.classList.contains("toggled")) {
+            await ViewerApp.MessageSender.SendTogglePhysicalKeys(true);
+        }
         const streamingState = new StreamingState();
         ProcessStream(streamingState);
         if (viewerOptions.ShouldRecordSession) {
