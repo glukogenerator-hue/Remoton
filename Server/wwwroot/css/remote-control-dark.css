@@ -107,3 +107,11 @@ footer a {
   background-color: rgb(60, 60, 60);
   color: white;
 }
+
+/* Режим «Physical Keys»: включённое состояние должно быть видно сразу, в обеих темах. */
+#physicalKeysButton.toggled {
+  background-color: #1f7a3a;
+  border: 1px solid #2fb457;
+  color: #ffffff;
+  font-weight: 600;
+}
