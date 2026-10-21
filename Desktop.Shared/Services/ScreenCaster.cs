@@ -290,7 +290,8 @@ internal class ScreenCaster : IScreenCaster
                 Math.Round(viewer.CurrentMbps, 2),
                 viewer.CurrentFps,
                 viewer.RoundTripLatency.TotalMilliseconds,
-                viewer.Capturer.IsGpuAccelerated);
+                viewer.Capturer.IsGpuAccelerated,
+                viewer.ImageQuality);
 
             _logger.LogDebug(
                 "Current Mbps: {currentMbps}.  " +

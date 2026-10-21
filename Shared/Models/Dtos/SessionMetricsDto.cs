@@ -7,12 +7,13 @@ namespace Remotely.Shared.Models.Dtos;
 public class SessionMetricsDto
 {
     [SerializationConstructor]
-    public SessionMetricsDto(double mbps, double fps, double roundTripLatency, bool isGpuAccelerated)
+    public SessionMetricsDto(double mbps, double fps, double roundTripLatency, bool isGpuAccelerated, int imageQuality = 0)
     {
         Mbps = mbps;
         Fps = fps;
         RoundTripLatency = roundTripLatency;
         IsGpuAccelerated = isGpuAccelerated;
+        ImageQuality = imageQuality;
     }
 
     [DataMember]
@@ -26,4 +27,10 @@ public class SessionMetricsDto
 
     [DataMember]
     public bool IsGpuAccelerated { get; }
+
+    /// <summary>
+    /// Текущее качество JPEG (35-80). Снижается, когда канал не справляется; 0 — агент не сообщил.
+    /// </summary>
+    [DataMember]
+    public int ImageQuality { get; }
 }

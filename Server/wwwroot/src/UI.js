@@ -45,6 +45,8 @@ export var FullScreenButton = document.getElementById("fullScreenButton");
 export var ToastsWrapper = document.getElementById("toastsWrapper");
 export var MbpsDiv = document.getElementById("mbpsDiv");
 export var FpsDiv = document.getElementById("fpsDiv");
+export var QualityIndicator = document.getElementById("qualityIndicator");
+export var QualityText = document.getElementById("qualityText");
 export var LatencyDiv = document.getElementById("latencyDiv");
 export var GpuDiv = document.getElementById("gpuAcceleratedDiv");
 export var WorkAreaGrid = document.getElementById("workAreaGrid");
@@ -111,6 +113,7 @@ export function ShowToast(message) {
 }
 export function ToggleConnectUI(shown) {
     if (shown) {
+        ResetQualityIndicator();
         ConnectButton.innerText = "Connect";
         Screen2DContext.clearRect(0, 0, ScreenViewer.width, ScreenViewer.height);
         ScreenViewerWrapper.setAttribute("hidden", "hidden");
@@ -165,11 +168,67 @@ export function UpdateDisplays(selectedDisplay, displayNames) {
         };
     }
 }
+// Без свежих метрик индикатор серый: данные приходят раз в 3 секунды.
+let MetricsStaleTimer;
 export function UpdateMetrics(metricsDto) {
     FpsDiv.innerHTML = metricsDto.Fps.toFixed(0);
     MbpsDiv.innerHTML = metricsDto.Mbps.toFixed(2);
     LatencyDiv.innerHTML = `${metricsDto.RoundTripLatency.toFixed(2)}ms`;
     GpuDiv.innerHTML = metricsDto.IsGpuAccelerated ? "Enabled" : "Unavailable";
+    UpdateQualityIndicator(metricsDto);
+}
+// Оценка канала по задержке и качеству картинки. FPS в оценке не участвует: на неподвижном экране
+// кадры не отправляются, и низкий FPS не означает плохой канал.
+// Качество JPEG хост снижает с 80 (норма) до 35, когда канал не справляется.
+export function UpdateQualityIndicator(metricsDto) {
+    var _a;
+    const latency = metricsDto.RoundTripLatency;
+    const quality = (_a = metricsDto.ImageQuality) !== null && _a !== void 0 ? _a : 0;
+    const hasQuality = quality > 0;
+    let level = "good";
+    let verdict = "Channel is good";
+    if (latency > 300 || (hasQuality && quality <= 50)) {
+        level = "bad";
+        verdict = "Channel is poor: high latency or the image quality was heavily reduced";
+    }
+    else if (latency > 120 || (hasQuality && quality < 80)) {
+        level = "warn";
+        verdict = "Channel is so-so: the image quality or frame rate may be reduced";
+    }
+    const parts = [
+        `${latency.toFixed(0)} ms`,
+        `${metricsDto.Fps.toFixed(0)} fps`,
+        `${metricsDto.Mbps.toFixed(1)} Mbps`
+    ];
+    if (hasQuality) {
+        parts.push(`Q${quality}`);
+    }
+    QualityText.textContent = parts.join(" · ");
+    QualityIndicator.title =
+        `${verdict}
+` +
+            `Latency: ${latency.toFixed(0)} ms
+` +
+            `Frames per second: ${metricsDto.Fps.toFixed(0)}
+` +
+            `Speed: ${metricsDto.Mbps.toFixed(2)} Mbps
+` +
+            (hasQuality ? `Image quality: ${quality} (max 80, min 35)
+` : "") +
+            `GPU capture: ${metricsDto.IsGpuAccelerated ? "yes" : "no"}`;
+    SetQualityLevel(level);
+    window.clearTimeout(MetricsStaleTimer);
+    MetricsStaleTimer = window.setTimeout(() => ResetQualityIndicator(), 10000);
+}
+export function ResetQualityIndicator() {
+    window.clearTimeout(MetricsStaleTimer);
+    QualityText.textContent = "-";
+    QualityIndicator.title = "Channel quality: no data";
+    SetQualityLevel("unknown");
+}
+function SetQualityLevel(level) {
+    QualityIndicator.classList.remove("quality-good", "quality-warn", "quality-bad", "quality-unknown");
+    QualityIndicator.classList.add(`quality-${level}`);
 }
 export function UpdateWindowsSessions(windowsSessions) {
     while (WindowsSessionSelect.options.length > 0) {
