@@ -3,6 +3,7 @@ using Bitbound.SimpleMessenger;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI.Services;
@@ -153,6 +154,13 @@ if (settings.UseHttpLogging)
         options.RequestHeaders.Add("Host");
     });
 }
+
+// Ключи защиты данных (cookie входа, antiforgery-токены) храним рядом с базой, в томе AppData.
+// Иначе они лежат внутри контейнера и теряются при каждом обновлении образа: все пользователи
+// разлогиниваются, а открытые страницы получают ошибку antiforgery.
+services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(
+        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AppData", "DataProtection-Keys")));
 
 services.AddCors(options =>
 {
