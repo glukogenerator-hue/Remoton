@@ -74,7 +74,10 @@ public class AgentHubSessionCache : IAgentHubSessionCache
         if (_connectionIdToDeviceLookup.TryRemove(connectionId, out var lookupResult))
         {
             device = lookupResult;
-            _ = _deviceIdToConnectionIdLookup.TryRemove(lookupResult.ID, out _);
+            // Привязку устройства снимаем, только если она ещё указывает на это соединение:
+            // агент мог уже переподключиться, и тогда она принадлежит новому соединению.
+            _ = _deviceIdToConnectionIdLookup.TryRemove(
+                new KeyValuePair<string, string>(lookupResult.ID, connectionId));
             return true;
         }
 

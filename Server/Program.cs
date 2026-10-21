@@ -205,7 +205,14 @@ services.AddSignalR(options =>
     {
         options.PayloadSerializerOptions.PropertyNameCaseInsensitive = true;
     })
-    .AddMessagePackProtocol();
+    .AddMessagePackProtocol()
+    // Агенты работают без видеопотока, канал у них не забит, поэтому обрыв можно замечать быстрее:
+    // от этого зависит, как скоро в админке устройство станет «не в сети».
+    .AddHubOptions<AgentHub>(options =>
+    {
+        options.KeepAliveInterval = TimeSpan.FromSeconds(10);
+        options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    });
 
 services.AddRateLimiter(options =>
 {

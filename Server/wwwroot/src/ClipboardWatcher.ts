@@ -95,6 +95,25 @@ export class ClipboardWatcher {
         }, 500);
     }
 
+    // Немедленно отправляет локальный буфер на хост. Нужно перед Ctrl+V: таймер срабатывает раз в
+    // полсекунды, и хост успевал вставить старое содержимое.
+    async SyncNow() {
+        if (!navigator.clipboard?.readText || !document.hasFocus()) {
+            return;
+        }
+
+        try {
+            const text = await navigator.clipboard.readText();
+            if (this.LastClipboardText != text) {
+                this.LastClipboardText = text;
+                await ViewerApp.MessageSender.SendTextTransfer(text, false);
+            }
+        }
+        catch (ex) {
+            console.warn("Immediate clipboard sync failed.", ex);
+        }
+    }
+
     SetClipboardText(text: string) {
         if (text == this.LastClipboardText) {
             return;
