@@ -28,7 +28,11 @@ public class KeyboardMouseInputWin(
     /// </summary>
     private readonly ConcurrentDictionary<string, SentKey> _pressedKeys = new();
 
-    private readonly record struct SentKey(VirtualKey? Vk, ushort? Unicode);
+    /// <summary>
+    /// WithShift — Shift нажимается самим агентом только на время этой клавиши, потому что
+    /// состояние Shift на хосте не совпало с тем, что нужно символу.
+    /// </summary>
+    private readonly record struct SentKey(VirtualKey? Vk, ushort? Unicode, bool WithShift = false);
 
     [Flags]
     private enum ShiftState : byte
@@ -61,7 +65,7 @@ public class KeyboardMouseInputWin(
                         return;
                     }
 
-                    var sent = SendInput(1, [input], INPUT.Size);
+                    var sent = SendInput((uint)input.Length, input, INPUT.Size);
                     if (sent == 0)
                     {
                         _logger.LogWarning(
@@ -95,7 +99,7 @@ public class KeyboardMouseInputWin(
                     return;
                 }
 
-                var sent = SendInput(1, [input], INPUT.Size);
+                var sent = SendInput((uint)input.Length, input, INPUT.Size);
                 if (sent == 0)
                 {
                     _logger.LogWarning(
@@ -305,7 +309,8 @@ public class KeyboardMouseInputWin(
             // Сначала отпускаем клавиши, которые нажимали мы сами (в том числе Unicode-символы).
             foreach (var sent in _pressedKeys.Values)
             {
-                SendInput(1, [CreateKeyInput(sent, false)], INPUT.Size);
+                var inputs = CreateKeyInputs(sent, false);
+                SendInput((uint)inputs.Length, inputs, INPUT.Size);
             }
             _pressedKeys.Clear();
 
@@ -518,11 +523,25 @@ public class KeyboardMouseInputWin(
         return result is not null;
     }
 
-    private static INPUT CreateKeyInput(SentKey sent, bool isPressed)
+    /// <summary>
+    /// Нажатие клавиши. Для символа, которому не хватает Shift на хосте, дополнительно
+    /// нажимается Shift — отдельным элементом того же пакета, чтобы состояние не «уплыло».
+    /// </summary>
+    private static INPUT[] CreateKeyInputs(SentKey sent, bool isPressed)
     {
-        return sent.Vk is { } vk ?
-            CreateKeyboardInput(vk, isPressed) :
-            CreateKeyboardInput(sent.Unicode!.Value, isPressed);
+        if (sent.Vk is not { } vk)
+        {
+            return [CreateKeyboardInput(sent.Unicode!.Value, isPressed)];
+        }
+
+        if (!sent.WithShift)
+        {
+            return [CreateKeyboardInput(vk, isPressed)];
+        }
+
+        return isPressed ?
+            [CreateKeyboardInput(VirtualKey.SHIFT, true), CreateKeyboardInput(vk, true)] :
+            [CreateKeyboardInput(vk, false), CreateKeyboardInput(VirtualKey.SHIFT, false)];
     }
 
     /// <summary>
@@ -613,8 +632,12 @@ public class KeyboardMouseInputWin(
 
     /// <summary>
     /// Выбирает способ ввода. Именованные клавиши идут как виртуальные.
-    /// Символ вводится как Unicode (работает в любой раскладке, включая русскую), а в сочетаниях
-    /// с Ctrl/Alt/Win используется физическая клавиша, иначе приложения не распознают горячие клавиши.
+    /// Символ вводится как символ, а не как клавиша: обычное нажатие используется только если
+    /// раскладка хоста в её текущем состоянии (Shift, Caps Lock) даст ровно этот символ,
+    /// иначе — Unicode. Так на хосте появляется то же, что набрано у клиента, независимо от
+    /// раскладки, Caps Lock и того, дошло ли нажатие Shift до хоста.
+    /// В сочетаниях с Ctrl/Alt/Win используется физическая клавиша, иначе приложения
+    /// не распознают горячие клавиши.
     /// </summary>
     private bool TryResolveKey(string key, string? code, out SentKey resolved)
     {
@@ -656,36 +679,104 @@ public class KeyboardMouseInputWin(
             }
         }
 
-        // Консоли (cmd, PowerShell, Windows Terminal), в том числе от администратора, не принимают
-        // Unicode-события и плохо определяют раскладку окна. Как реальная клавиатура, шлём
-        // физическую клавишу: какой символ получится, решает раскладка консоли.
-        if (IsConsoleWindowFocused() && TryConvertCodeToVirtualKey(code, out var consoleKey))
+        if (TryResolveCharacter(character, out resolved))
         {
-            resolved = new SentKey(consoleKey, null);
             return true;
-        }
-
-        // Обычный ввод. Если символ набирается клавишей раскладки окна, шлём обычное нажатие:
-        // консоли (в том числе запущенные от администратора) и часть программ плохо принимают
-        // Unicode-события (VK_PACKET). Unicode остаётся для символов, которых в раскладке нет,
-        // например русских букв при английской раскладке на хосте.
-        var keyScan = VkKeyScanEx(character, GetForegroundKeyboardLayout());
-        if (keyScan != -1)
-        {
-            var modifiers = (keyScan >> 8) & 0xFF;
-            var needsShift = (modifiers & 1) != 0;
-            var needsCtrlOrAlt = (modifiers & 6) != 0; // AltGr и подобные
-            // Shift на хосте нажимается отдельным событием клиента. Если регистр не совпадает с тем,
-            // что даст клавиша при текущем Shift (например, включён Caps Lock на клиенте), точнее Unicode.
-            if (!needsCtrlOrAlt && needsShift == IsShiftPressedOnHost())
-            {
-                resolved = new SentKey((VirtualKey)(keyScan & 0xFF), null);
-                return true;
-            }
         }
 
         resolved = new SentKey(null, character);
         return true;
+    }
+
+    /// <summary>
+    /// Символ можно напечатать обычным нажатием, только если раскладка окна, куда идёт ввод,
+    /// в её текущем состоянии выдаст именно его. Иначе нужен Unicode.
+    /// </summary>
+    private bool TryResolveCharacter(char character, out SentKey resolved)
+    {
+        resolved = default;
+
+        var layout = GetForegroundKeyboardLayout();
+        var keyScan = VkKeyScanEx(character, layout);
+        if (keyScan == -1)
+        {
+            return false;
+        }
+
+        var modifiers = (keyScan >> 8) & 0xFF;
+
+        // Ctrl/Alt (в том числе AltGr) агентом не нажимаются, поэтому такие символы
+        // надёжнее отдать как Unicode.
+        if ((modifiers & 0b110) != 0)
+        {
+            return false;
+        }
+
+        var vk = (VirtualKey)(keyScan & 0xFF);
+        var scan = MapVirtualKeyEx((uint)vk, VkMapType.MAPVK_VK_TO_VSC, layout);
+        var hostState = GetHostKeyState();
+
+        if (GetTypedCharacter(vk, scan, hostState, layout) == character)
+        {
+            resolved = new SentKey(vk, null);
+            return true;
+        }
+
+        // Регистр не совпал: Shift на хосте не нажат (до него не дошло нажатие клиента)
+        // или, наоборот, включён Caps Lock. Shift можно дожать на время этой клавиши,
+        // Caps Lock не трогаем — тогда остаётся Unicode.
+        if ((hostState[(int)VirtualKey.SHIFT] & 0x80) == 0)
+        {
+            var withShift = (byte[])hostState.Clone();
+            withShift[(int)VirtualKey.SHIFT] = 0x80;
+            if (GetTypedCharacter(vk, scan, withShift, layout) == character)
+            {
+                resolved = new SentKey(vk, null, WithShift: true);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Символ, который даст клавиша при указанном состоянии клавиатуры.
+    /// У мёртвых клавиш ToUnicodeEx оставляет состояние в раскладке, поэтому такие символы
+    /// считаются неподходящими и уходят в Unicode.
+    /// </summary>
+    private static char GetTypedCharacter(VirtualKey vk, uint scan, byte[] keyState, nint layout)
+    {
+        var buffer = new System.Text.StringBuilder(4);
+        var length = ToUnicodeEx((uint)vk, scan, keyState, buffer, buffer.Capacity, 0, layout);
+        return length == 1 ? buffer[0] : '\0';
+    }
+
+    /// <summary>
+    /// Текущее состояние Shift/Ctrl/Alt/Caps Lock на хосте. Именно реальное, а не то,
+    /// что мы отправляли: нажатие могло до хоста не дойти.
+    /// </summary>
+    private static byte[] GetHostKeyState()
+    {
+        var state = new byte[256];
+
+        if ((GetAsyncKeyState(VirtualKey.SHIFT) & 0x8000) != 0)
+        {
+            state[(int)VirtualKey.SHIFT] = 0x80;
+        }
+        if ((GetAsyncKeyState(VirtualKey.CONTROL) & 0x8000) != 0)
+        {
+            state[(int)VirtualKey.CONTROL] = 0x80;
+        }
+        if ((GetAsyncKeyState(VirtualKey.MENU) & 0x8000) != 0)
+        {
+            state[(int)VirtualKey.MENU] = 0x80;
+        }
+        if ((GetAsyncKeyState(VirtualKey.CAPITAL) & 1) != 0)
+        {
+            state[(int)VirtualKey.CAPITAL] = 0x01;
+        }
+
+        return state;
     }
 
     /// <summary>
@@ -698,49 +789,14 @@ public class KeyboardMouseInputWin(
         return GetKeyboardLayout(threadId);
     }
 
-    /// <summary>
-    /// Сейчас в фокусе консольное окно: классическая консоль (conhost) или Windows Terminal.
-    /// </summary>
-    private static bool IsConsoleWindowFocused()
+    private bool TryCreateKeyInput(string key, string? code, bool isPressed, out INPUT[] input)
     {
-        var window = GetForegroundWindow();
-        if (window == nint.Zero)
-        {
-            return false;
-        }
-
-        var className = new System.Text.StringBuilder(256);
-        if (GetClassName(window, className, className.Capacity) == 0)
-        {
-            return false;
-        }
-
-        return className.ToString() is
-            "ConsoleWindowClass" or
-            "CASCADIA_HOSTING_WINDOW_CLASS" or
-            "PseudoConsoleWindow";
-    }
-
-    private bool IsShiftPressedOnHost()
-    {
-        foreach (var sent in _pressedKeys.Values)
-        {
-            if (sent.Vk is VirtualKey.SHIFT or VirtualKey.LSHIFT or VirtualKey.RSHIFT)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private bool TryCreateKeyInput(string key, string? code, bool isPressed, out INPUT input)
-    {
-        input = default;
+        input = [];
         var id = string.IsNullOrEmpty(code) ? key : code;
 
         if (!isPressed && _pressedKeys.TryRemove(id, out var pressed))
         {
-            input = CreateKeyInput(pressed, false);
+            input = CreateKeyInputs(pressed, false);
             return true;
         }
 
@@ -755,7 +811,7 @@ public class KeyboardMouseInputWin(
             _pressedKeys[id] = resolved;
         }
 
-        input = CreateKeyInput(resolved, isPressed);
+        input = CreateKeyInputs(resolved, isPressed);
         return true;
     }
 
