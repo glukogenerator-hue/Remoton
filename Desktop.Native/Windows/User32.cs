@@ -1324,6 +1324,23 @@ public static class User32
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern short VkKeyScanEx(char ch, nint dwhkl);
 
+    /// <summary>
+    /// Какой символ даст клавиша при переданном состоянии клавиатуры (Shift, Ctrl, Alt, Caps Lock)
+    /// в переданной раскладке. -1 — мёртвая клавиша, 0 — символ не получается.
+    /// </summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int ToUnicodeEx(
+        uint wVirtKey,
+        uint wScanCode,
+        byte[] lpKeyState,
+        [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pwszBuff,
+        int cchBuff,
+        uint wFlags,
+        nint dwhkl);
+
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(VirtualKey nVirtKey);
+
     [DllImport("user32.dll")]
     public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam);
 
