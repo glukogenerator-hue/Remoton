@@ -1,0 +1,114 @@
+name: Release agent
+
+# Сборка пакетов агента и автономных клиентов для выкладки на сервер.
+# Руками это делается по рецепту из README (§129): Publish.ps1 требует MSBuild из
+# Visual Studio, поэтому здесь те же шаги выполняются обычным dotnet publish.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия пакета в виде yyyy.MM.dd.HHmm. Пусто — берётся из даты коммита."
+        required: false
+        default: ""
+        type: string
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Пакет ${{ matrix.rid }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-x86]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # Shared.csproj собирается под net8.0 и net10.0, поэтому нужны оба SDK.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Версия
+        id: ver
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $raw = (git show -s --format=%ci HEAD).Trim()
+            if ($raw -notmatch '^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})') {
+              throw "Не удалось разобрать дату коммита: $raw"
+            }
+            $version = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$($Matches[4])$($Matches[5])"
+          }
+          Write-Host "Версия: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $arch = "${{ matrix.rid }}" -replace '^win-', ''
+          "arch=$arch" >> $env:GITHUB_OUTPUT
+
+      - name: Агент
+        shell: pwsh
+        run: |
+          dotnet publish Agent/Agent.csproj `
+            -p:Version=${{ steps.ver.outputs.version }} `
+            -p:FileVersion=${{ steps.ver.outputs.version }} `
+            --runtime ${{ matrix.rid }} --self-contained --configuration Release `
+            --output Agent/bin/publish/${{ matrix.rid }}
+
+      # Профиль кладёт модуль рабочего стола в Agent/bin/publish/<rid>/Desktop.
+      - name: Модуль рабочего стола (в пакет агента)
+        shell: pwsh
+        run: |
+          dotnet publish Desktop.Win/Desktop.Win.csproj `
+            -p:Version=${{ steps.ver.outputs.version }} `
+            -p:FileVersion=${{ steps.ver.outputs.version }} `
+            -p:PublishProfile=packaged-${{ matrix.rid }} `
+            --configuration Release
+
+      # Автономный клиент для скачивания с сайта: профиль пишет в Server/wwwroot/Content/Win-<arch>.
+      - name: Автономный клиент
+        shell: pwsh
+        run: |
+          dotnet publish Desktop.Win/Desktop.Win.csproj `
+            -p:Version=${{ steps.ver.outputs.version }} `
+            -p:FileVersion=${{ steps.ver.outputs.version }} `
+            -p:PublishProfile=desktop-${{ matrix.rid }} `
+            --configuration Release
+
+      # Пакет должен распаковываться корнем: Expand-Archive кладёт файлы сразу в
+      # каталог установки, и агент ищет Remotely_Agent.exe рядом с собой.
+      - name: Пакет агента
+        shell: pwsh
+        run: |
+          $src = "Agent/bin/publish/${{ matrix.rid }}"
+          if (!(Test-Path "$src/Remotely_Agent.exe")) { throw "Нет Remotely_Agent.exe в $src" }
+          if (!(Test-Path "$src/Desktop/Remotely_Desktop.exe")) { throw "Нет Desktop/Remotely_Desktop.exe в $src" }
+          Compress-Archive -Path "$src/*" -DestinationPath "Remotely-Win-${{ matrix.rid }}.zip" -CompressionLevel Optimal -Force
+
+      # Проверка, что в артефакт попал именно тот код, который ждём (ловит промах по профилю публикации).
+      - name: Проверка сборки клиента
+        shell: pwsh
+        run: |
+          $dll = "Agent/bin/publish/${{ matrix.rid }}/Desktop/Remotely_Desktop.dll"
+          $text = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($dll))
+          foreach ($symbol in @('ToUnicodeEx', 'TryResolveCharacter', 'GetHostKeyState')) {
+            if (!$text.Contains($symbol)) { throw "В $dll нет $symbol" }
+          }
+          Write-Host "Символы на месте."
+
+      - name: Артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: Remotely-Win-${{ matrix.rid }}-${{ steps.ver.outputs.version }}
+          if-no-files-found: error
+          path: |
+            Remotely-Win-${{ matrix.rid }}.zip
+            Server/wwwroot/Content/Win-${{ steps.ver.outputs.arch }}/Remotely_Desktop.exe
