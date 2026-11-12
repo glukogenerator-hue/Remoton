@@ -91,7 +91,7 @@ jobs:
           $src = "Agent/bin/publish/${{ matrix.rid }}"
           if (!(Test-Path "$src/Remotely_Agent.exe")) { throw "Нет Remotely_Agent.exe в $src" }
           if (!(Test-Path "$src/Desktop/Remotely_Desktop.exe")) { throw "Нет Desktop/Remotely_Desktop.exe в $src" }
-          Compress-Archive -Path "$src/*" -DestinationPath "Remotely-Win-${{ matrix.rid }}.zip" -CompressionLevel Optimal -Force
+          Compress-Archive -Path "$src/*" -DestinationPath "Remotely-Win-${{ steps.ver.outputs.arch }}.zip" -CompressionLevel Optimal -Force
 
       # Проверка, что в артефакт попал именно тот код, который ждём (ловит промах по профилю публикации).
       - name: Проверка сборки клиента
@@ -107,8 +107,8 @@ jobs:
       - name: Артефакты
         uses: actions/upload-artifact@v4
         with:
-          name: Remotely-Win-${{ matrix.rid }}-${{ steps.ver.outputs.version }}
+          name: Remotely-Win-${{ steps.ver.outputs.arch }}-${{ steps.ver.outputs.version }}
           if-no-files-found: error
           path: |
-            Remotely-Win-${{ matrix.rid }}.zip
+            Remotely-Win-${{ steps.ver.outputs.arch }}.zip
             Server/wwwroot/Content/Win-${{ steps.ver.outputs.arch }}/Remotely_Desktop.exe
