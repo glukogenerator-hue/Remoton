@@ -8,7 +8,9 @@ namespace Remotely.Shared.Services;
 
 public class FileLogger : ILogger
 {
-    private static readonly ConcurrentStack<string> _scopeStack = new();
+    // Стек scopes привязан к асинхронному потоку выполнения, а не общий на процесс:
+    // иначе scopes HTTP-обработчиков подмешивались в строки чужих категорий.
+    private static readonly AsyncLocal<ConcurrentStack<string>> _scopeStack = new();
     private readonly string _categoryName;
     private readonly string _componentName;
     private readonly string _componentVersion;
@@ -23,10 +25,12 @@ public class FileLogger : ILogger
 
     private string LogPath => FileLoggerDefaults.GetLogPath(_componentName);
 
+    private static ConcurrentStack<string> ScopeStack => _scopeStack.Value ??= new();
+
     public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull
     {
-        _scopeStack.Push($"{state}");
+        ScopeStack.Push($"{state}");
         return new NoopDisposable();
     }
 
@@ -36,18 +40,32 @@ public class FileLogger : ILogger
         return logLevel switch
         {
             LogLevel.Trace or LogLevel.Debug => EnvironmentHelper.IsDebug,
-            LogLevel.Information or LogLevel.Warning or LogLevel.Error or LogLevel.Critical => true,
+            // HttpClientFactory пишет 4 строки Information на каждый запрос
+            // (Start/Send/Received/End), дублируя URL в категории и сообщении.
+            // Полезные события обновления и сердцебиения логируются отдельно,
+            // поэтому от HTTP-шума оставляем только предупреждения и ошибки.
+            LogLevel.Information => !_categoryName.StartsWith("System.Net.Http", StringComparison.Ordinal),
+            LogLevel.Warning or LogLevel.Error or LogLevel.Critical => true,
             _ => false,
         };
     }
-    public async void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        using var logLock = await FileLoggerDefaults.AcquireLock();
+        // Часть вызовов (LoggerExtensions с массивом параметров) приходит без
+        // предварительной проверки IsEnabled, поэтому фильтруем и здесь.
+        if (!IsEnabled(logLevel))
+        {
+            return;
+        }
+
+        // Синхронная запись с блокировкой: прежний async void не гарантировал
+        // порядок строк (порядок захвата блокировки мог отличаться от порядка вызова).
+        using var logLock = FileLoggerDefaults.AcquireLockSync();
 
         try
         {
 
-            var message = FormatLogEntry(logLevel, _categoryName, $"{state}", exception, _scopeStack.ToArray());
+            var message = FormatLogEntry(logLevel, _categoryName, $"{state}", exception, ScopeStack.ToArray());
             CheckLogFileExists();
             File.AppendAllText(LogPath, message);
             CleanupLogs();
@@ -141,7 +159,7 @@ public class FileLogger : ILogger
     {
         public void Dispose()
         {
-            _scopeStack.TryPop(out _);
+            ScopeStack.TryPop(out _);
         }
     }
 }

@@ -48,7 +48,7 @@
             {
                 <div @key="@device.ID">
                     <input class="me-1" type="checkbox"
-                           checked="@(_selectedDeviceGroups.Contains(device.ID))"
+                           checked="@(_selectedDevices.Contains(device.ID))"
                            @onchange="ev => DeviceSelectedChanged(ev, device)" />
 
                     <span class="align-top">@device.DeviceName</span>

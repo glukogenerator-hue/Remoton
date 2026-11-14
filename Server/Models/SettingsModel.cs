@@ -15,9 +15,23 @@ public class SettingsModel
     public bool EnforceAttendedAccess { get; set; }
     public bool ForceClientHttps { get; set; }
     public List<string> KnownProxies { get; set; } = [];
+
+    /// <summary>
+    /// Группы устройств, которым разрешено обновляться в текущую волну.
+    /// Пустой список — обновляются все устройства (прежнее поведение).
+    /// Действует только для агентов, проверяющих обновление через
+    /// /api/AgentUpdate/CheckPackage; старые агенты обновляются без ограничений.
+    /// </summary>
+    public List<string> AgentUpdateWaveDeviceGroups { get; set; } = [];
     public int MaxConcurrentUpdates { get; set; } = 10;
     public int MaxOrganizationCount { get; set; } = 1;
     public string MessageOfTheDay { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Через сколько дней после последнего выхода устройства на связь создавать оповещение
+    /// «Device offline». 0 — отключить. Проверяет фоновая служба раз в час.
+    /// </summary>
+    public int OfflineDeviceAlertThresholdInDays { get; set; } = 7;
     public bool RedirectToHttps { get; set; } = true;
     public bool RemoteControlNotifyUser { get; set; } = true;
     public bool RemoteControlRequiresAuthentication { get; set; } = true;

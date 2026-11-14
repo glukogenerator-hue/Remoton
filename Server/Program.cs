@@ -111,6 +111,12 @@ services.AddIdentityCore<RemotelyUser>(options =>
     options.Password.RequireNonAlphanumeric = false;
     // Только для новых и изменяемых паролей. Существующие пароли продолжают работать.
     options.Password.RequiredLength = 8;
+    // Блокировка после неудачных попыток входа. Порог увеличен по сравнению с
+    // стандартными 5 попытками, чтобы администратор не заблокировал себя опечатками,
+    // но перебор паролей остаётся бессмысленным.
+    options.Lockout.AllowedForNewUsers = true;
+    options.Lockout.MaxFailedAccessAttempts = 10;
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
 })
     .AddEntityFrameworkStores<AppDb>()
     .AddSignInManager()
@@ -252,6 +258,7 @@ services.AddScoped<ApiAuthorizationFilter>();
 services.AddScoped<LocalOnlyFilter>();
 services.AddScoped<ExpiringTokenFilter>();
 services.AddHostedService<DataCleanupService>();
+services.AddHostedService<DeviceOfflineAlertService>();
 services.AddHostedService<ScriptScheduler>();
 services.AddSingleton<IUpgradeService, UpgradeService>();
 services.AddScoped<IToastService, ToastService>();

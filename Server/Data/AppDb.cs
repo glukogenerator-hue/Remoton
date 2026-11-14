@@ -31,9 +31,11 @@ public class AppDb : IdentityDbContext
     public DbSet<BrandingInfo> BrandingInfos { get; set; }
     public DbSet<DeviceGroup> DeviceGroups { get; set; }
     public DbSet<Device> Devices { get; set; }
+    public DbSet<DeviceMetricSample> DeviceMetricSamples { get; set; }
     public DbSet<InviteLink> InviteLinks { get; set; }
     public DbSet<KeyValueRecord> KeyValueRecords { get; set; }
     public DbSet<Organization> Organizations { get; set; }
+    public DbSet<RemoteControlSessionLog> RemoteControlSessionLogs { get; set; }
     public DbSet<SavedScript> SavedScripts { get; set; }
     public DbSet<ScriptResult> ScriptResults { get; set; }
     public DbSet<ScriptRun> ScriptRuns { get; set; }

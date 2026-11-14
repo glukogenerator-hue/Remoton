@@ -1,0 +1,114 @@
+@page "/agent-versions"
+
+@attribute [Authorize]
+@inherits AuthComponentBase
+
+@inject IDataService DataService
+@inject IUpgradeService UpgradeService
+
+<PageTitle>Agent Versions</PageTitle>
+
+<h3>Agent Versions</h3>
+<p class="text-muted">
+    Distribution of agent builds across the devices you can access.
+    Versions older than the server version can be updated by replacing the
+    agent package on the server (see README, &quot;Updating Agents&quot;).
+</p>
+
+@if (_rows.Count == 0)
+{
+    <p>No devices available.</p>
+}
+else
+{
+    <div class="table-responsive" style="max-width: 720px;">
+        <table class="table table-striped table-sm">
+            <thead>
+                <tr>
+                    <th>Agent Version</th>
+                    <th class="text-end">Devices</th>
+                    <th class="text-end">Online</th>
+                    <th class="text-end">Offline</th>
+                    <th>Last Seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td>
+                            @row.Version
+                            @if (row.IsCurrent)
+                            {
+                                <span class="badge bg-success" title="Matches the server version">current</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning text-dark" title="Older than the server version">outdated</span>
+                            }
+                        </td>
+                        <td class="text-end">@row.Total</td>
+                        <td class="text-end">@row.Online</td>
+                        <td class="text-end">@row.Offline</td>
+                        <td>@row.LastSeen.ToString("yyyy-MM-dd HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th>Total</th>
+                    <th class="text-end">@_rows.Sum(x => x.Total)</th>
+                    <th class="text-end">@_rows.Sum(x => x.Online)</th>
+                    <th class="text-end">@_rows.Sum(x => x.Offline)</th>
+                    <th></th>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+
+@code {
+    private sealed record VersionRow(string Version, int Total, int Online, int Offline, DateTimeOffset LastSeen, bool IsCurrent);
+
+    private readonly List<VersionRow> _rows = new();
+    private Version? _serverVersion;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        EnsureUserSet();
+
+        try
+        {
+            _serverVersion = UpgradeService.GetCurrentVersion();
+        }
+        catch (Exception)
+        {
+            // Версия сборки недоступна — помечаем «актуальность» по совпадению строк.
+        }
+
+        var devices = DataService.GetDevicesForUser(UserName);
+
+        // Если версию сервера узнать не удалось, «актуальной» считаем самую новую
+        // версию среди устройств парка.
+        var referenceVersion = _serverVersion ??
+            devices.Select(x => Version.TryParse(x.AgentVersion, out var v) ? v : null)
+                .Where(x => x is not null)
+                .Cast<Version>()
+                .DefaultIfEmpty(new Version(0, 0))
+                .Max();
+
+        _rows.AddRange(devices
+            .GroupBy(x => string.IsNullOrWhiteSpace(x.AgentVersion) ? "(not set)" : x.AgentVersion!)
+            .Select(group => new VersionRow(
+                group.Key,
+                group.Count(),
+                group.Count(x => x.IsOnline),
+                group.Count(x => !x.IsOnline),
+                group.Max(x => x.LastOnline),
+                Version.TryParse(group.Key, out var parsed) && parsed >= referenceVersion))
+            .OrderByDescending(x => Version.TryParse(x.Version, out _) ? Version.Parse(x.Version) : new Version(0, 0))
+            .ThenBy(x => x.Version)
+            .ToList());
+    }
+}

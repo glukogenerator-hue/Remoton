@@ -16,6 +16,12 @@ public partial class DeviceDetails : AuthComponentBase
     private readonly ConcurrentQueue<string> _logLines = new();
     private readonly ConcurrentQueue<ScriptResult> _scriptResults = new();
 
+    private RemoteControlSessionLog[] _sessionLogs = Array.Empty<RemoteControlSessionLog>();
+    private DeviceMetricSample[] _metricSamples = Array.Empty<DeviceMetricSample>();
+    private double[] _cpuSamples = Array.Empty<double>();
+    private double[] _memorySamples = Array.Empty<double>();
+    private double[] _storageSamples = Array.Empty<double>();
+
     private string? _alertMessage;
     private Device? _device;
     private bool _userHasAccess;
@@ -70,6 +76,18 @@ public partial class DeviceDetails : AuthComponentBase
         }
 
         _deviceGroups = DataService.GetDeviceGroups(UserName);
+
+        if (_device is not null && _userHasAccess)
+        {
+            // История метрик нужна только для вкладки «Details», грузим один раз при открытии.
+            var deviceId = _device.ID;
+            var userName = UserName!;
+            _metricSamples = await DataService.GetDeviceMetricSamples(deviceId, userName, TimeSpan.FromHours(24));
+            _cpuSamples = _metricSamples.Select(x => x.CpuUtilization).ToArray();
+            _memorySamples = _metricSamples.Select(x => x.UsedMemoryPercent).ToArray();
+            _storageSamples = _metricSamples.Select(x => x.UsedStoragePercent).ToArray();
+        }
+
         await Register<ReceiveLogsMessage, string>(
             CircuitConnection.ConnectionId,
             HandleReceiveLogsMessage);
@@ -109,6 +127,25 @@ public partial class DeviceDetails : AuthComponentBase
         {
             NavManager.NavigateTo($"/device-details/{_inputDeviceId}");
         }
+    }
+
+    private void GetSessionLogs()
+    {
+        if (_device is null)
+        {
+            return;
+        }
+
+        EnsureUserSet();
+
+        var deviceId = _device.ID;
+        var userName = UserName!;
+
+        _ = Task.Run(async () =>
+        {
+            _sessionLogs = await DataService.GetRemoteControlSessionLogs(deviceId, userName);
+            await InvokeAsync(StateHasChanged);
+        });
     }
 
     private void GetRemoteLogs()

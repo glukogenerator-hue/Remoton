@@ -1,10 +1,13 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using Remotely.Server.Hubs;
 using Remotely.Server.RateLimiting;
 using Remotely.Server.Services;
 using Remotely.Shared.Interfaces;
+using Remotely.Server.Models;
+using System.Collections.Concurrent;
 using System.Net;
 
 namespace Remotely.Server.API;
@@ -90,6 +93,130 @@ public class AgentUpdateController : ControllerBase
     public async Task<ActionResult> DownloadPackage(string platform, string downloadId)
     {
         return await DownloadPackage(platform);
+    }
+
+    // Точка проверки обновления для агентов с поддержкой поэтапной раскатки.
+    // Агент вызывает её вместо HEAD на статический файл /Content/*.zip и передаёт
+    // свой DeviceId. Если в Server Config заданы группы волны, устройство вне этих
+    // групп всегда получает 304 — оно не обновится, пока его группу не добавят в волну.
+    // Старые агенты продолжают проверять статический файл и обновляются без ограничений.
+    [HttpGet("[action]/{platform}")]
+    public async Task<ActionResult> CheckPackage(string platform, [FromQuery] string? deviceId)
+    {
+        try
+        {
+            if (!TryGetPackagePath(platform, out var filePath))
+            {
+                return BadRequest();
+            }
+
+            var settings = await _dataService.GetSettings();
+
+            if (!await IsDeviceInUpdateWave(deviceId, settings))
+            {
+                return StatusCode((int)HttpStatusCode.NotModified);
+            }
+
+            var etagValue = GetPackageEtag(filePath);
+
+            // Если-None-Match приходит от агента как сохранённый etag.txt; сравниваем
+            // строки, допуская слабые etag с префиксом W/.
+            var ifNoneMatch = Request.Headers.IfNoneMatch.ToString();
+            if (!string.IsNullOrEmpty(ifNoneMatch) &&
+                ifNoneMatch
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Any(x => x.Equals(etagValue, StringComparison.Ordinal) ||
+                              x.Equals("W/" + etagValue, StringComparison.Ordinal)))
+            {
+                return StatusCode((int)HttpStatusCode.NotModified);
+            }
+
+            Response.Headers.ETag = etagValue;
+            return File(System.IO.File.OpenRead(filePath), "application/octet-stream");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while checking package for update.");
+            return StatusCode((int)HttpStatusCode.InternalServerError);
+        }
+    }
+
+    private bool TryGetPackagePath(string platform, out string filePath)
+    {
+        filePath = platform.ToLower() switch
+        {
+            "win-x64" => Path.Combine(_hostEnv.WebRootPath, "Content", "Remotely-Win-x64.zip"),
+            "win-x86" => Path.Combine(_hostEnv.WebRootPath, "Content", "Remotely-Win-x86.zip"),
+            "linux" => Path.Combine(_hostEnv.WebRootPath, "Content", "Remotely-Linux.zip"),
+            "macos-x64" => Path.Combine(_hostEnv.WebRootPath, "Content", "Remotely-MacOS-x64.zip"),
+            _ => string.Empty
+        };
+
+        return !string.IsNullOrEmpty(filePath);
+    }
+
+    private async Task<bool> IsDeviceInUpdateWave(string? deviceId, SettingsModel settings)
+    {
+        // Группы волны не заданы — обновляются все устройства (прежнее поведение).
+        if (settings.AgentUpdateWaveDeviceGroups is not { Count: > 0 })
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            // Проверка без идентификатора (curl, тесты) — не ограничиваем.
+            return true;
+        }
+
+        var deviceResult = await _dataService.GetDevice(
+            deviceId,
+            query => query.Include(x => x.DeviceGroup));
+
+        if (!deviceResult.IsSuccess)
+        {
+            // Неизвестный идентификатор — не ограничиваем, чтобы не блокировать
+            // свежие установки с ещё не зарегистрированным DeviceId.
+            return true;
+        }
+
+        var device = deviceResult.Value;
+
+        if (settings.BannedDevices.Contains(device.ID, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return device.DeviceGroup is not null &&
+            settings.AgentUpdateWaveDeviceGroups.Contains(
+                device.DeviceGroup.Name,
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    // ETag считаем по содержимому пакета, чтобы значение пережило перезапуск сервера.
+    // Полный хеш 100-МБ файла считается один раз и кэшируется до изменения размера
+    // или времени изменения файла.
+    private static readonly ConcurrentDictionary<string, (string EtagValue, DateTime MTime, long Length)> _packageEtags = new();
+
+    private static string GetPackageEtag(string filePath)
+    {
+        var fileInfo = new FileInfo(filePath);
+        var cacheKey = Path.GetFileName(filePath);
+
+        if (_packageEtags.TryGetValue(cacheKey, out var cached) &&
+            cached.MTime == fileInfo.LastWriteTimeUtc &&
+            cached.Length == fileInfo.Length)
+        {
+            return cached.EtagValue;
+        }
+
+        using var stream = fileInfo.OpenRead();
+        var hash = System.Security.Cryptography.SHA256.HashData(stream);
+        var etagValue = $"\"pkg-{Convert.ToHexString(hash)[..32]}\"";
+
+        _packageEtags[cacheKey] = (etagValue, fileInfo.LastWriteTimeUtc, fileInfo.Length);
+
+        return etagValue;
     }
 
     private async Task<bool> CheckForDeviceBan(string deviceIp)

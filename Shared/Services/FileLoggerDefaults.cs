@@ -43,6 +43,12 @@ public static class FileLoggerDefaults
         return new CallbackDisposable(() => _logLock.Release());
     }
 
+    public static IDisposable AcquireLockSync()
+    {
+        _logLock.Wait();
+        return new CallbackDisposable(() => _logLock.Release());
+    }
+
     public static string GetLogPath(string componentName) => 
         Path.Combine(LogsFolderPath, componentName, $"LogFile_{DateTime.Now:yyyy-MM-dd}.log");
 

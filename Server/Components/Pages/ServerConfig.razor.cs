@@ -21,6 +21,9 @@ public partial class ServerConfig : AuthComponentBase
     private string? _knownProxySelected;
     private string? _knownProxyToAdd;
 
+    private string? _waveGroupSelected;
+    private string? _waveGroupToAdd;
+
     private bool _showAdminsOnly;
     private bool _showMyOrgAdminsOnly = true;
     private string? _trustedCorsOriginSelected;
@@ -126,6 +129,36 @@ public partial class ServerConfig : AuthComponentBase
 
         Input.TrustedCorsOrigins.Add(_trustedCorsOriginToAdd);
         _trustedCorsOriginToAdd = null;
+    }
+
+    private void AddWaveGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_waveGroupToAdd))
+        {
+            return;
+        }
+
+        Input.AgentUpdateWaveDeviceGroups.Add(_waveGroupToAdd);
+        _waveGroupToAdd = string.Empty;
+    }
+
+    private void HandleWaveGroupKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key.Equals("Enter", StringComparison.OrdinalIgnoreCase))
+        {
+            AddWaveGroup();
+        }
+    }
+
+    private void RemoveWaveGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_waveGroupSelected))
+        {
+            return;
+        }
+
+        Input.AgentUpdateWaveDeviceGroups.Remove(_waveGroupSelected);
+        _waveGroupSelected = null;
     }
 
     private IEnumerable<string> GetOutdatedDevices()

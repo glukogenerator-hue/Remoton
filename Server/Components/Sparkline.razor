@@ -1,0 +1,52 @@
+@namespace Remotely.Server.Components
+
+<svg width="@Width" height="@Height" viewBox="0 0 @Width @Height" preserveAspectRatio="none" role="img">
+    @if (Values.Count > 1)
+    {
+        <polyline points="@_points" fill="none" stroke="@Stroke" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+        <circle cx="@_lastX" cy="@_lastY" r="2" fill="@Stroke" />
+    }
+</svg>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<double> Values { get; set; } = Array.Empty<double>();
+
+    /// <summary>
+    /// Верхняя граница шкалы (например, 1 для долей или 100 для процентов).
+    /// </summary>
+    [Parameter]
+    public double MaxValue { get; set; } = 1;
+
+    [Parameter]
+    public string Stroke { get; set; } = "#0d6efd";
+
+    [Parameter]
+    public int Width { get; set; } = 240;
+
+    [Parameter]
+    public int Height { get; set; } = 40;
+
+    private string _points = string.Empty;
+    private double _lastX;
+    private double _lastY;
+
+    protected override void OnParametersSet()
+    {
+        var scale = MaxValue > 0 ? MaxValue : 1;
+        var step = Values.Count > 1 ? (double)Width / (Values.Count - 1) : 0;
+
+        var points = new List<string>(Values.Count);
+        for (var i = 0; i < Values.Count; i++)
+        {
+            var x = i * step;
+            var ratio = Math.Clamp(Values[i] / scale, 0, 1);
+            var y = Height - 2 - ratio * (Height - 4);
+            points.Add($"{x:F1},{y:F1}");
+            _lastX = x;
+            _lastY = y;
+        }
+
+        _points = string.Join(" ", points);
+    }
+}

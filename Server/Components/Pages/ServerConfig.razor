@@ -129,6 +129,13 @@
                 <ValidationMessage For="() => Input.EnableRemoteControlRecording" />
             </div>
             <div class="form-group">
+                <label class="control-label">Device Offline Alerts (days, 0 = off)</label>
+                <br />
+                <InputNumber @bind-Value="Input.OfflineDeviceAlertThresholdInDays" class="form-control" autocomplete="off" />
+                <br />
+                <ValidationMessage For="() => Input.OfflineDeviceAlertThresholdInDays" />
+            </div>
+            <div class="form-group">
                 <label>Enable Windows Event Log</label>
                 <br />
                 <InputCheckbox @bind-Value="Input.EnableWindowsEventLog" autocomplete="off" />
@@ -179,6 +186,35 @@
                 <InputNumber @bind-Value="Input.MaxOrganizationCount" class="form-control" autocomplete="off" />
                 <br />
                 <ValidationMessage For="() => Input.MaxOrganizationCount" />
+            </div>
+            <div class="form-group">
+                <label class="control-label">Agent Update Wave Groups</label>
+                <br />
+                <select class="form-control" @bind="_waveGroupSelected" size="4">
+                    @foreach (var group in Input.AgentUpdateWaveDeviceGroups)
+                    {
+                        <option @key="group" value="@group">@group</option>
+                    }
+                </select>
+                <div class="text-end mb-2 mt-1">
+                    <button type="button" class="btn btn-secondary" @onclick="RemoveWaveGroup">Remove</button>
+                </div>
+                <div class="input-group">
+                    <input @bind="_waveGroupToAdd"
+                           @bind:event="oninput"
+                           placeholder="Add a device group allowed to update"
+                           class="form-control"
+                           autocomplete="off"
+                           @onkeydown="HandleWaveGroupKeyDown" />
+
+                    <button type="button" class="btn btn-secondary" @onclick="AddWaveGroup">Add</button>
+                </div>
+                <small class="text-muted">
+                    Devices in these groups receive agent updates while a staged rollout is in progress.
+                    Leave empty to let every device update. Older agents checking the static package
+                    file directly are not gated.
+                </small>
+                <ValidationMessage For="() => Input.AgentUpdateWaveDeviceGroups" />
             </div>
             <div class="form-group">
                 <label class="control-label">Max Concurrent Updates</label>

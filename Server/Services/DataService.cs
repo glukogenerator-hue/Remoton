@@ -34,6 +34,8 @@ public interface IDataService
 
     Task AddScriptRun(ScriptRun scriptRun);
 
+    Task AddRemoteControlSessionLog(RemoteControlSessionLog log);
+
     Task<string> AddSharedFile(IBrowserFile file, string organizationId, Action<double, string> progressCallback);
 
     Task<string> AddSharedFile(IFormFile file, string organizationId);
@@ -68,6 +70,8 @@ public interface IDataService
 
     void DeviceDisconnected(string deviceId);
 
+    Task EndRemoteControlSessionLog(string logId);
+
     bool DoesUserExist(string userName);
 
     bool DoesUserHaveAccessToDevice(string deviceId, RemotelyUser remotelyUser);
@@ -77,6 +81,8 @@ public interface IDataService
     string[] FilterDeviceIdsByUserPermission(string[] deviceIds, RemotelyUser remotelyUser);
 
     string[] FilterUsersByDevicePermission(IEnumerable<string> userIds, string deviceId);
+
+    Task<int> GenerateOfflineDeviceAlerts(int thresholdInDays);
 
     Task<Result<Alert>> GetAlert(string alertId);
 
@@ -116,6 +122,8 @@ public interface IDataService
 
     int GetDeviceCount(RemotelyUser user);
 
+    Task<DeviceMetricSample[]> GetDeviceMetricSamples(string deviceId, string userName, TimeSpan window);
+
     Task<Result<DeviceGroup>> GetDeviceGroup(
         string deviceGroupId,
         bool includeDevices = false,
@@ -139,6 +147,8 @@ public interface IDataService
     Task<Result<string>> GetOrganizationNameById(string organizationId);
 
     Task<Result<string>> GetOrganizationNameByUserName(string userName);
+
+    Task<RemoteControlSessionLog[]> GetRemoteControlSessionLogs(string deviceId, string userName);
 
     Task<IEnumerable<ScriptRun>> GetPendingScriptRuns(string deviceId);
 
@@ -217,6 +227,9 @@ public interface IDataService
 
 public class DataService : IDataService
 {
+    public const string OfflineAlertMessage = "Device offline";
+
+
     private readonly IAppDbFactory _appDbFactory;
     private readonly IHostEnvironment _hostEnvironment;
     private readonly ILogger<DataService> _logger;
@@ -265,6 +278,47 @@ public class DataService : IDataService
         });
 
         await dbContext.SaveChangesAsync();
+    }
+
+    public async Task<int> GenerateOfflineDeviceAlerts(int thresholdInDays)
+    {
+        if (thresholdInDays <= 0)
+        {
+            return 0;
+        }
+
+        var threshold = DateTimeOffset.Now - TimeSpan.FromDays(thresholdInDays);
+
+        using var dbContext = _appDbFactory.GetContext();
+
+        var offlineDevices = await dbContext.Devices
+            .Where(x => !x.IsOnline && x.LastOnline < threshold)
+            .ToListAsync();
+
+        // Алерт считается актуальным, пока устройство снова не выйдет на связь
+        // (CreatedOn позже LastOnline). Иначе каждое устройство получало бы новое
+        // оповещение при каждом проходе службы.
+        var devicesWithAlert = (await dbContext.Alerts
+            .Where(x =>
+                x.Message == OfflineAlertMessage &&
+                x.Device != null &&
+                x.CreatedOn > x.Device.LastOnline)
+            .Select(x => x.DeviceID)
+            .ToListAsync())
+            .ToHashSet();
+
+        var createdCount = 0;
+        foreach (var device in offlineDevices.Where(x => !devicesWithAlert.Contains(x.ID)))
+        {
+            await AddAlert(
+                device.ID,
+                device.OrganizationID,
+                OfflineAlertMessage,
+                details: $"Device has been offline for at least {thresholdInDays} day(s). Last online: {device.LastOnline:yyyy-MM-dd HH:mm}.");
+            createdCount++;
+        }
+
+        return createdCount;
     }
 
     public async Task<Result<DeviceGroup>> AddDeviceGroup(string orgId, DeviceGroup deviceGroup)
@@ -407,8 +461,38 @@ public class DataService : IDataService
             return Result.Fail<Device>("Organization does not exist.");
         }
 
+        AddMetricSample(dbContext, device);
+
         await dbContext.SaveChangesAsync();
         return Result.Ok(device);
+    }
+
+    // Точка истории метрик записывается не чаще этого интервала: обновление
+    // состояния приходит при каждом сердцебиении агента, а для графика
+    // достаточно четырёх точек в час.
+    private static readonly TimeSpan MetricSampleInterval = TimeSpan.FromMinutes(15);
+
+    private static void AddMetricSample(AppDb dbContext, Device device)
+    {
+        var newestSample = dbContext.DeviceMetricSamples
+            .Where(x => x.DeviceID == device.ID)
+            .OrderByDescending(x => x.Timestamp)
+            .FirstOrDefault();
+
+        if (newestSample is not null &&
+            DateTimeOffset.Now - newestSample.Timestamp < MetricSampleInterval)
+        {
+            return;
+        }
+
+        dbContext.DeviceMetricSamples.Add(new DeviceMetricSample
+        {
+            DeviceID = device.ID,
+            Timestamp = DateTimeOffset.Now,
+            CpuUtilization = device.CpuUtilization,
+            UsedMemoryPercent = device.TotalMemory > 0 ? device.UsedMemory / device.TotalMemory : 0,
+            UsedStoragePercent = device.TotalStorage > 0 ? device.UsedStorage / device.TotalStorage : 0
+        });
     }
 
     public async Task<Result> AddOrUpdateSavedScript(SavedScript script, string userId)
@@ -666,6 +750,16 @@ public class DataService : IDataService
                                 .Where(x => x.TimeStamp < expirationDate);
 
         dbContext.RemoveRange(commandResults);
+
+        var sessionLogs = dbContext.RemoteControlSessionLogs
+                                .Where(x => x.StartedOn < expirationDate);
+
+        dbContext.RemoveRange(sessionLogs);
+
+        var metricSamples = dbContext.DeviceMetricSamples
+                                .Where(x => x.Timestamp < expirationDate);
+
+        dbContext.RemoveRange(metricSamples);
 
         var sharedFiles = dbContext.SharedFiles
                                 .Where(x => x.Timestamp < expirationDate);
@@ -1073,6 +1167,77 @@ public class DataService : IDataService
         using var dbContext = _appDbFactory.GetContext();
 
         return FilterUsersByDevicePermissionInternal(dbContext, userIds, deviceId);
+    }
+
+    public async Task AddRemoteControlSessionLog(RemoteControlSessionLog log)
+    {
+        using var dbContext = _appDbFactory.GetContext();
+
+        dbContext.RemoteControlSessionLogs.Add(log);
+        await dbContext.SaveChangesAsync();
+    }
+
+    public async Task<DeviceMetricSample[]> GetDeviceMetricSamples(string deviceId, string userName, TimeSpan window)
+    {
+        using var dbContext = _appDbFactory.GetContext();
+
+        var user = dbContext.Users.FirstOrDefault(x => x.UserName == userName);
+
+        if (user is null || !DoesUserHaveAccessToDevice(deviceId, user))
+        {
+            return [];
+        }
+
+        var start = DateTimeOffset.Now - window;
+
+        return await dbContext.DeviceMetricSamples
+            .AsNoTracking()
+            .Where(x => x.DeviceID == deviceId && x.Timestamp >= start)
+            .OrderBy(x => x.Timestamp)
+            .ToArrayAsync();
+    }
+
+    public async Task EndRemoteControlSessionLog(string logId)
+    {
+        if (string.IsNullOrWhiteSpace(logId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var dbContext = _appDbFactory.GetContext();
+
+            var log = await dbContext.RemoteControlSessionLogs.FindAsync(logId);
+            if (log is not null && log.EndedOn is null)
+            {
+                log.EndedOn = DateTimeOffset.Now;
+                await dbContext.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while ending remote control session log {logId}.", logId);
+        }
+    }
+
+    public async Task<RemoteControlSessionLog[]> GetRemoteControlSessionLogs(string deviceId, string userName)
+    {
+        using var dbContext = _appDbFactory.GetContext();
+
+        var user = dbContext.Users.FirstOrDefault(x => x.UserName == userName);
+
+        if (user is null || !DoesUserHaveAccessToDevice(deviceId, user))
+        {
+            return [];
+        }
+
+        return await dbContext.RemoteControlSessionLogs
+            .AsNoTracking()
+            .Where(x => x.DeviceID == deviceId)
+            .OrderByDescending(x => x.StartedOn)
+            .Take(200)
+            .ToArrayAsync();
     }
 
     public async Task<Result<Alert>> GetAlert(string alertId)

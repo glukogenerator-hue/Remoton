@@ -17,7 +17,7 @@ namespace Remotely.Server.Migrations.PostgreSql
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.2")
+                .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -493,6 +493,32 @@ namespace Remotely.Server.Migrations.PostgreSql
                     b.ToTable("DeviceGroups");
                 });
 
+            modelBuilder.Entity("Remotely.Shared.Entities.DeviceMetricSample", b =>
+                {
+                    b.Property<string>("ID")
+                        .HasColumnType("text");
+
+                    b.Property<double>("CpuUtilization")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("DeviceID")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double>("UsedMemoryPercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("UsedStoragePercent")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("ID");
+
+                    b.ToTable("DeviceMetricSamples");
+                });
+
             modelBuilder.Entity("Remotely.Shared.Entities.InviteLink", b =>
                 {
                     b.Property<string>("ID")
@@ -556,6 +582,50 @@ namespace Remotely.Server.Migrations.PostgreSql
                     b.HasKey("ID");
 
                     b.ToTable("Organizations");
+                });
+
+            modelBuilder.Entity("Remotely.Shared.Entities.RemoteControlSessionLog", b =>
+                {
+                    b.Property<string>("ID")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DeviceID")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("EndedOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OrganizationID")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequesterDisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("StartedOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("ViewOnly")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ViewerIPAddress")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ViewerUserName")
+                        .HasColumnType("text");
+
+                    b.HasKey("ID");
+
+                    b.ToTable("RemoteControlSessionLogs");
                 });
 
             modelBuilder.Entity("Remotely.Shared.Entities.SavedScript", b =>

@@ -54,6 +54,9 @@ else
             <TabHeader Name="script-history" OnActivated="GetScriptHistory" NavigationUri="@($"/device-details/{DeviceId}/script-history")">
                 Script History
             </TabHeader>
+            <TabHeader Name="connections" OnActivated="GetSessionLogs" NavigationUri="@($"/device-details/{DeviceId}/connections")">
+                Connections
+            </TabHeader>
         </TabHeaders>
 
         <TabContents>
@@ -198,6 +201,31 @@ else
                             <button type="submit" class="btn btn-primary">Save</button>
                         </div>
                     </EditForm>
+
+                    <h5 class="mt-4">Last 24 Hours</h5>
+                    @if (!_metricSamples.Any())
+                    {
+                        <p class="text-muted">No metric history recorded yet. It is collected while the agent is online, one sample about every 15 minutes.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-sm" style="max-width: 480px;">
+                            <tbody>
+                                <tr>
+                                    <td style="width: 30%;">CPU: @(_device.CpuUtilization.ToString("0"))%</td>
+                                    <td><Sparkline Values="@_cpuSamples" MaxValue="100" Stroke="#198754" /></td>
+                                </tr>
+                                <tr>
+                                    <td>Memory: @(Math.Round(_device.UsedMemoryPercent * 100))%</td>
+                                    <td><Sparkline Values="@_memorySamples" MaxValue="1" Stroke="#0d6efd" /></td>
+                                </tr>
+                                <tr>
+                                    <td>Storage: @(Math.Round(_device.UsedStoragePercent * 100))%</td>
+                                    <td><Sparkline Values="@_storageSamples" MaxValue="1" Stroke="#ffc107" /></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    }
                 </div>
             </TabContent>
 
@@ -265,6 +293,48 @@ else
                                 <td>
                                     <button class="btn btn-sm btn-primary" @onclick="() => ShowFullScriptOutput(scriptResult)">Show Full</button>
                                 </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+            </TabContent>
+
+            <TabContent Name="connections">
+
+                <h3 class="mb-3 mt-3">
+                    Connection Log
+                </h3>
+                <p class="text-muted">
+                    Remote control sessions for this device, newest first (up to 200 records).
+                </p>
+                <table class="table table-dark table-hover table-striped">
+                    <thead>
+                        <tr>
+                            <th>Started</th>
+                            <th>Ended</th>
+                            <th>User</th>
+                            <th>Requested By</th>
+                            <th>IP Address</th>
+                            <th>Mode</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!_sessionLogs.Any())
+                        {
+                            <tr>
+                                <td colspan="6">No recorded connections.</td>
+                            </tr>
+                        }
+                        @foreach (var sessionLog in _sessionLogs)
+                        {
+                            <tr>
+                                <td>@sessionLog.StartedOn.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@sessionLog.EndedOn?.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@sessionLog.ViewerUserName</td>
+                                <td>@sessionLog.RequesterDisplayName</td>
+                                <td>@sessionLog.ViewerIPAddress</td>
+                                <td>@sessionLog.Mode@(sessionLog.ViewOnly ? " (view only)" : "")</td>
                             </tr>
                         }
                     </tbody>

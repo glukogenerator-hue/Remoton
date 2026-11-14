@@ -74,7 +74,10 @@ public class UpdaterLinux : IUpdater
             var connectionInfo = _configService.GetConnectionInfo();
             var serverUrl = _configService.GetConnectionInfo().Host;
 
-            var fileUrl = serverUrl + $"/Content/Remotely-Linux.zip";
+            // Проверка через API, а не через статический файл: сервер по DeviceId
+            // решает, входит ли устройство в текущую волну обновления.
+            var fileUrl = serverUrl +
+                $"/api/AgentUpdate/CheckPackage/linux?deviceId={Uri.EscapeDataString(connectionInfo.DeviceID)}";
 
             using var httpClient = _httpClientFactory.CreateClient();
             using var request = new HttpRequestMessage(HttpMethod.Head, fileUrl);

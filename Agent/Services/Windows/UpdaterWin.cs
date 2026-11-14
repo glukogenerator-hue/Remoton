@@ -73,8 +73,11 @@ public class UpdaterWin : IUpdater
             var connectionInfo = _configService.GetConnectionInfo();
             var serverUrl = _configService.GetConnectionInfo().Host;
 
+            // Проверка через API, а не через статический файл: сервер по DeviceId
+            // решает, входит ли устройство в текущую волну обновления.
             var platform = Environment.Is64BitOperatingSystem ? "x64" : "x86";
-            var fileUrl = serverUrl + $"/Content/Remotely-Win-{platform}.zip";
+            var fileUrl = serverUrl +
+                $"/api/AgentUpdate/CheckPackage/win-{platform}?deviceId={Uri.EscapeDataString(connectionInfo.DeviceID)}";
 
             using var httpClient = _httpClientFactory.CreateClient();
             using var request = new HttpRequestMessage(HttpMethod.Head, fileUrl);

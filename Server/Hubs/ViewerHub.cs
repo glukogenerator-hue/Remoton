@@ -2,6 +2,7 @@ using Remotely.Server.Enums;
 using Remotely.Server.Filters;
 using Remotely.Server.Models;
 using Remotely.Server.Services;
+using Remotely.Shared.Entities;
 using Remotely.Shared.Interfaces;
 using Remotely.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -181,6 +182,13 @@ public class ViewerHub : Hub<IViewerHubClient>
         }
 
         SessionInfo.ViewerList.Remove(Context.ConnectionId);
+
+        if (Context.Items.TryGetValue(nameof(RemoteControlSessionLog), out var logId) &&
+            logId is string id)
+        {
+            await _dataService.EndRemoteControlSessionLog(id);
+        }
+
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -283,7 +291,34 @@ public class ViewerHub : Hub<IViewerHubClient>
                     SessionInfo.StreamId);
         }
 
+        await LogSessionStart();
         return Result.Ok();
+    }
+
+    private async Task LogSessionStart()
+    {
+        try
+        {
+            var log = new RemoteControlSessionLog
+            {
+                DeviceID = SessionInfo.DeviceId,
+                DeviceName = SessionInfo.MachineName,
+                OrganizationID = SessionInfo.OrganizationId,
+                ViewerUserName = Context.User?.Identity?.Name,
+                RequesterDisplayName = RequesterDisplayName,
+                ViewerIPAddress = Context.GetHttpContext()?.Connection?.RemoteIpAddress?.ToString(),
+                Mode = SessionInfo.Mode.ToString(),
+                ViewOnly = SessionInfo.ViewOnly
+            };
+
+            await _dataService.AddRemoteControlSessionLog(log);
+            Context.Items[nameof(RemoteControlSessionLog)] = log.ID;
+        }
+        catch (Exception ex)
+        {
+            // Журнал не должен ломать сам сеанс удалённого управления.
+            _logger.LogError(ex, "Error while writing remote control session log.");
+        }
     }
 
     public async Task StoreSessionRecording(IAsyncEnumerable<byte[]> webmStream)
