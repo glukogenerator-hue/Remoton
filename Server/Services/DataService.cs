@@ -84,6 +84,8 @@ public interface IDataService
 
     Task<int> GenerateOfflineDeviceAlerts(int thresholdInDays);
 
+    string? GetLatestKnownAgentVersion();
+
     Task<Result<Alert>> GetAlert(string alertId);
 
     Alert[] GetAlerts(string userId);
@@ -319,6 +321,20 @@ public class DataService : IDataService
         }
 
         return createdCount;
+    }
+
+    public string? GetLatestKnownAgentVersion()
+    {
+        using var dbContext = _appDbFactory.GetContext();
+
+        // Таблица небольшая, поэтому разбираем версии в памяти: строковое
+        // сравнение не учитывает формат версии.
+        return dbContext.Devices
+            .Select(x => x.AgentVersion)
+            .ToList()
+            .Where(x => !string.IsNullOrWhiteSpace(x) && Version.TryParse(x, out _))
+            .OrderBy(x => Version.Parse(x!))
+            .LastOrDefault();
     }
 
     public async Task<Result<DeviceGroup>> AddDeviceGroup(string orgId, DeviceGroup deviceGroup)

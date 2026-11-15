@@ -117,6 +117,22 @@ public class AgentUpdateController : ControllerBase
                 return StatusCode((int)HttpStatusCode.NotModified);
             }
 
+            // Агент, уже стоящий на самой свежей версии из известных серверу,
+            // всегда получает 304 независимо от ETag: установщик записывает в
+            // etag.txt статический ETag файла /Content, который не совпадает
+            // с ETag этого эндпоинта, и сравнение по ETag сходится никогда.
+            if (!string.IsNullOrWhiteSpace(deviceId))
+            {
+                var deviceResult = await _dataService.GetDevice(deviceId);
+                if (deviceResult.IsSuccess &&
+                    Version.TryParse(deviceResult.Value.AgentVersion, out var deviceVersion) &&
+                    Version.TryParse(_dataService.GetLatestKnownAgentVersion(), out var latestVersion) &&
+                    deviceVersion >= latestVersion)
+                {
+                    return StatusCode((int)HttpStatusCode.NotModified);
+                }
+            }
+
             var etagValue = GetPackageEtag(filePath);
 
             // Если-None-Match приходит от агента как сохранённый etag.txt; сравниваем
