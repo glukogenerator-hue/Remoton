@@ -209,19 +209,19 @@ else
                     }
                     else
                     {
-                        <table class="table table-sm" style="max-width: 480px;">
+                        <table class="table table-dark table-sm" style="max-width: 480px;">
                             <tbody>
                                 <tr>
                                     <td style="width: 30%;">CPU: @(_device.CpuUtilization.ToString("0"))%</td>
-                                    <td><Sparkline Values="@_cpuSamples" MaxValue="100" Stroke="#198754" /></td>
+                                    <td><Sparkline Values="@_cpuSamples" MaxValue="100" Stroke="#00bc8c" /></td>
                                 </tr>
                                 <tr>
                                     <td>Memory: @(Math.Round(_device.UsedMemoryPercent * 100))%</td>
-                                    <td><Sparkline Values="@_memorySamples" MaxValue="1" Stroke="#0d6efd" /></td>
+                                    <td><Sparkline Values="@_memorySamples" MaxValue="1" Stroke="#3498db" /></td>
                                 </tr>
                                 <tr>
                                     <td>Storage: @(Math.Round(_device.UsedStoragePercent * 100))%</td>
-                                    <td><Sparkline Values="@_storageSamples" MaxValue="1" Stroke="#ffc107" /></td>
+                                    <td><Sparkline Values="@_storageSamples" MaxValue="1" Stroke="#f39c12" /></td>
                                 </tr>
                             </tbody>
                         </table>
