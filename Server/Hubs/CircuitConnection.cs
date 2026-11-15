@@ -170,16 +170,35 @@ public class CircuitConnection : CircuitHandler, ICircuitConnection
             ConnectionId);
     }
 
-    public Task GetRemoteLogs(string deviceId)
+    // Пользователь выставляется в OnCircuitOpenedAsync, но компоненты могут
+    // инициализироваться раньше его завершения (например, вкладка Remote Logs
+    // активируется из TabHeader.OnInitializedAsync). Лениво дочитываем пользователя,
+    // чтобы автоактивация вкладки не падала «User is not set».
+    private async Task<RemotelyUser?> EnsureUserAsync()
     {
+        if (_user is null && await _authService.IsAuthenticated())
+        {
+            var userResult = await _authService.GetUser();
+            if (userResult.IsSuccess)
+            {
+                _user = userResult.Value;
+            }
+        }
+
+        return _user;
+    }
+
+    public async Task GetRemoteLogs(string deviceId)
+    {
+        await EnsureUserAsync();
         var (canAccess, key) = CanAccessDevice(deviceId);
         if (!canAccess)
         {
             _toastService.ShowToast("Access denied.", classString: "bg-warning");
-            return Task.CompletedTask;
+            return;
         }
 
-        return _agentHubContext.Clients.Client(key).GetLogs(ConnectionId);
+        await _agentHubContext.Clients.Client(key).GetLogs(ConnectionId);
     }
 
     public override async Task OnCircuitClosedAsync(Circuit circuit, CancellationToken cancellationToken)
@@ -531,7 +550,7 @@ public class CircuitConnection : CircuitHandler, ICircuitConnection
 
     private (bool canAccess, string connectionId) CanAccessDevice(string deviceId)
     {
-        if (string.IsNullOrWhiteSpace(deviceId))
+        if (string.IsNullOrWhiteSpace(deviceId) || _user is null)
         {
             return (false, string.Empty);
         }
