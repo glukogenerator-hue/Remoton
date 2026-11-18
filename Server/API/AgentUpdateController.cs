@@ -6,6 +6,7 @@ using Remotely.Server.Hubs;
 using Remotely.Server.RateLimiting;
 using Remotely.Server.Services;
 using Remotely.Shared.Interfaces;
+using Remotely.Shared.Entities;
 using Remotely.Server.Models;
 using System.Collections.Concurrent;
 using System.Net;
@@ -103,16 +104,33 @@ public class AgentUpdateController : ControllerBase
     [HttpGet("[action]/{platform}")]
     public async Task<ActionResult> CheckPackage(string platform, [FromQuery] string? deviceId)
     {
+        // Агент считает «есть обновление» любым ответом кроме 304 и запускает
+        // переустановку. Поэтому при любой внутренней проблеме безопаснее ответить
+        // «обновлений нет»: машина продолжит работать на текущей версии.
         try
         {
             if (!TryGetPackagePath(platform, out var filePath))
             {
-                return BadRequest();
+                _logger.LogWarning("Unknown platform requested in CheckPackage: {platform}.", platform);
+                return StatusCode((int)HttpStatusCode.NotModified);
             }
 
             var settings = await _dataService.GetSettings();
 
-            if (!await IsDeviceInUpdateWave(deviceId, settings))
+            Device? device = null;
+            if (!string.IsNullOrWhiteSpace(deviceId))
+            {
+                var deviceResult = await _dataService.GetDevice(
+                    deviceId,
+                    query => query.Include(x => x.DeviceGroup));
+
+                if (deviceResult.IsSuccess)
+                {
+                    device = deviceResult.Value;
+                }
+            }
+
+            if (!IsDeviceInUpdateWave(device, settings))
             {
                 return StatusCode((int)HttpStatusCode.NotModified);
             }
@@ -121,16 +139,12 @@ public class AgentUpdateController : ControllerBase
             // всегда получает 304 независимо от ETag: установщик записывает в
             // etag.txt статический ETag файла /Content, который не совпадает
             // с ETag этого эндпоинта, и сравнение по ETag сходится никогда.
-            if (!string.IsNullOrWhiteSpace(deviceId))
+            if (device is not null &&
+                Version.TryParse(device.AgentVersion, out var deviceVersion) &&
+                Version.TryParse(_dataService.GetLatestKnownAgentVersion(), out var latestVersion) &&
+                deviceVersion >= latestVersion)
             {
-                var deviceResult = await _dataService.GetDevice(deviceId);
-                if (deviceResult.IsSuccess &&
-                    Version.TryParse(deviceResult.Value.AgentVersion, out var deviceVersion) &&
-                    Version.TryParse(_dataService.GetLatestKnownAgentVersion(), out var latestVersion) &&
-                    deviceVersion >= latestVersion)
-                {
-                    return StatusCode((int)HttpStatusCode.NotModified);
-                }
+                return StatusCode((int)HttpStatusCode.NotModified);
             }
 
             var etagValue = GetPackageEtag(filePath);
@@ -152,8 +166,8 @@ public class AgentUpdateController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error while checking package for update.");
-            return StatusCode((int)HttpStatusCode.InternalServerError);
+            _logger.LogError(ex, "Error while checking package for update.  Treating as no update available.");
+            return StatusCode((int)HttpStatusCode.NotModified);
         }
     }
 
@@ -171,7 +185,7 @@ public class AgentUpdateController : ControllerBase
         return !string.IsNullOrEmpty(filePath);
     }
 
-    private async Task<bool> IsDeviceInUpdateWave(string? deviceId, SettingsModel settings)
+    private bool IsDeviceInUpdateWave(Device? device, SettingsModel settings)
     {
         // Группы волны не заданы — обновляются все устройства (прежнее поведение).
         if (settings.AgentUpdateWaveDeviceGroups is not { Count: > 0 })
@@ -179,24 +193,12 @@ public class AgentUpdateController : ControllerBase
             return true;
         }
 
-        if (string.IsNullOrWhiteSpace(deviceId))
+        if (device is null)
         {
-            // Проверка без идентификатора (curl, тесты) — не ограничиваем.
+            // Проверка без идентификатора (curl, тесты) или неизвестное устройство —
+            // не ограничиваем, чтобы не блокировать свежие установки.
             return true;
         }
-
-        var deviceResult = await _dataService.GetDevice(
-            deviceId,
-            query => query.Include(x => x.DeviceGroup));
-
-        if (!deviceResult.IsSuccess)
-        {
-            // Неизвестный идентификатор — не ограничиваем, чтобы не блокировать
-            // свежие установки с ещё не зарегистрированным DeviceId.
-            return true;
-        }
-
-        var device = deviceResult.Value;
 
         if (settings.BannedDevices.Contains(device.ID, StringComparer.OrdinalIgnoreCase))
         {

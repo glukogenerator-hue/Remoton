@@ -100,6 +100,17 @@ public class UpdaterLinux : IUpdater
                 return;
             }
 
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                // Устанавливать обновление в ответ на ошибку сервера нельзя:
+                // переустановка поверх работающей службы при недоступном сервере
+                // может оставить пустые файлы и сломать агента.
+                _logger.LogWarning(
+                    "Service Updater: Unexpected status code {statusCode}.  Skipping update check.",
+                    (int)response.StatusCode);
+                return;
+            }
+
             _logger.LogInformation("Service Updater: Update found.");
 
             await InstallLatestVersion();

@@ -74,6 +74,24 @@ function Is-Administrator() {
 
 function Run-StartupChecks {
 
+	# Позволяем повторную установку/восстановление без параметров:
+	# если рядом уже лежит ConnectionInfo.json, берём адрес сервера и организацию оттуда.
+	if ((!$HostName -or !$Organization) -and (Test-Path -Path "$InstallPath\ConnectionInfo.json")) {
+		try {
+			$ExistingConnectionInfo = Get-Content -Path "$InstallPath\ConnectionInfo.json" -Raw | ConvertFrom-Json
+			if (!$HostName -and $ExistingConnectionInfo.Host) {
+				$script:HostName = $ExistingConnectionInfo.Host
+			}
+			if (!$Organization -and $ExistingConnectionInfo.OrganizationID) {
+				$script:Organization = $ExistingConnectionInfo.OrganizationID
+			}
+			Write-Log "Using existing ConnectionInfo.json for server URL and organization."
+		}
+		catch {
+			Write-Log "Failed to read existing ConnectionInfo.json.  Continuing with supplied parameters."
+		}
+	}
+
 	if (!$HostName -or !$Organization) {
 		Write-Log "Required parameters are missing.  Please try downloading the installer again."
 		Do-Exit
@@ -111,9 +129,20 @@ function Run-StartupChecks {
 }
 
 function Stop-Remotely {
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc delete Remotely_Service" -Wait -WindowStyle Hidden
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service & sc delete Remotely_Service" -Wait -WindowStyle Hidden
 	Stop-Process -Name Remotely_Agent -Force -ErrorAction SilentlyContinue
 	Stop-Process -Name Remotely_Desktop -Force -ErrorAction SilentlyContinue
+
+	# Ждём, пока процесс действительно завершится и отпустит файлы.
+	# Распаковка поверх ещё залоченных файлов оставляла пустые deps.json,
+	# после чего агент не запускался.
+	for ($i = 0; $i -lt 60; $i++) {
+		if (!(Get-Process -Name Remotely_Agent -ErrorAction SilentlyContinue)) {
+			break
+		}
+		Start-Sleep -Milliseconds 500
+	}
+	Start-Sleep -Milliseconds 500
 }
 
 function Uninstall-Remotely {
@@ -172,10 +201,45 @@ function Install-Remotely {
 		Do-Exit
 	}
 
-	Stop-Remotely
-	Get-ChildItem -Path $InstallPath | Where-Object { $_.Name -notlike "ConnectionInfo.json" } | Remove-Item -Recurse -Force
+	# Распаковываем и проверяем новую версию ДО того, как трогать рабочую установку.
+	# Прерванная переустановка раньше оставляла пустые файлы в рабочем каталоге
+	# (например, Remotely_Agent.deps.json), и агент не мог запуститься.
+	$StagingPath = "$InstallPath.new"
+	Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+	Expand-Archive -Path "$env:TEMP\Remotely-Win-$Platform.zip" -DestinationPath $StagingPath -Force
 
-	Expand-Archive -Path "$env:TEMP\Remotely-Win-$Platform.zip" -DestinationPath "$InstallPath" -Force
+	$StagedDepsPath = "$StagingPath\Remotely_Agent.deps.json"
+	$PackageIsValid = (Test-Path -Path "$StagingPath\Remotely_Agent.exe") -and
+		(Test-Path -Path $StagedDepsPath) -and
+		((Get-Item -Path $StagedDepsPath).Length -gt 100)
+
+	if (!$PackageIsValid) {
+		Write-Log "Downloaded package is incomplete or corrupted.  Aborting without changing the current installation."
+		Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+		Do-Exit
+	}
+
+	Stop-Remotely
+
+	# Замена каталога: сначала переименовываем старый (это почти атомарная операция),
+	# затем ставим на его место новый. Если переименовать не удалось, рабочая
+	# установка остаётся нетронутой.
+	$OldInstallPath = "$InstallPath.old"
+	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
+
+	if (Test-Path -Path $InstallPath) {
+		try {
+			Rename-Item -Path $InstallPath -NewName $OldInstallPath -ErrorAction Stop
+		}
+		catch {
+			Write-Log "Failed to move the current installation aside.  Aborting to keep the current version working."
+			Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+			Do-Exit
+		}
+	}
+
+	Move-Item -Path $StagingPath -Destination $InstallPath -Force
+	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 
 	New-Item -ItemType File -Path "$InstallPath\ConnectionInfo.json" -Value (ConvertTo-Json -InputObject $ConnectionInfo) -Force
 
@@ -191,6 +255,13 @@ function Install-Remotely {
 
 		$Body = $DeviceSetupOptions | ConvertTo-Json
 		Invoke-RestMethod -Method Post -ContentType "application/json" -Uri "$HostName/api/devices" -Body $Body
+	}
+
+	# Служба могла остаться зарегистрированной (например, при обновлении),
+	# тогда New-Service упадёт.
+	if (Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue) {
+		Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc delete Remotely_Service" -Wait -WindowStyle Hidden
+		Start-Sleep -Seconds 2
 	}
 
 	New-Service -Name "Remotely_Service" -BinaryPathName "`"$InstallPath\Remotely_Agent.exe`"" -DisplayName "Remotely Service" -StartupType Automatic -Description "Background service that maintains a connection to the Remotely server.  The service is used for remote support and maintenance by this computer's administrators."
