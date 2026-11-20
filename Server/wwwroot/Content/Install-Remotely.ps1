@@ -185,10 +185,19 @@ function Uninstall-Remotely {
 }
 
 function Install-Remotely {
-	$HeadResponse = Invoke-WebRequest -Uri "$HostName/Content/Remotely-Win-$Platform.zip" -Method Head -UseBasicParsing
-	$ETag = $HeadResponse.Headers["ETag"]
-	if (!$Etag) {
-		Write-Log "Failed to get ETag from server.  Aborting install."
+	# ETag не обязателен для установки: при офлайн-установке из локального файла
+	# сервер недоступен, и это не должно обрывать установку.
+	$ETag = $null
+	try {
+		$HeadResponse = Invoke-WebRequest -Uri "$HostName/Content/Remotely-Win-$Platform.zip" -Method Head -UseBasicParsing -ErrorAction Stop
+		$ETag = $HeadResponse.Headers["ETag"]
+	}
+	catch {
+		Write-Log "Failed to get ETag from server (offline install?).  Continuing."
+	}
+	if (!$ETag) {
+		Write-Log "No ETag available.  Agent will check for updates on its own schedule."
+		$ETag = "unknown"
 	}
 
 	if ((Test-Path -Path "$InstallPath") -and (Test-Path -Path "$InstallPath\ConnectionInfo.json")) {
