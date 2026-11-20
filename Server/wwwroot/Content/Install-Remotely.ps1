@@ -75,20 +75,32 @@ function Is-Administrator() {
 function Run-StartupChecks {
 
 	# Позволяем повторную установку/восстановление без параметров:
-	# если рядом уже лежит ConnectionInfo.json, берём адрес сервера и организацию оттуда.
-	if ((!$HostName -or !$Organization) -and (Test-Path -Path "$InstallPath\ConnectionInfo.json")) {
-		try {
-			$ExistingConnectionInfo = Get-Content -Path "$InstallPath\ConnectionInfo.json" -Raw | ConvertFrom-Json
-			if (!$HostName -and $ExistingConnectionInfo.Host) {
-				$script:HostName = $ExistingConnectionInfo.Host
+	# ищем ConnectionInfo.json в рабочем каталоге, в каталоге от прерванного
+	# обновления (.old) и в резервной копии в TEMP.
+	$ConnectionInfoCandidates = @(
+		"$InstallPath\ConnectionInfo.json",
+		"$InstallPath.old\ConnectionInfo.json",
+		"$env:TEMP\Remotely-ConnectionInfo.json"
+	)
+
+	if (!$HostName -or !$Organization) {
+		foreach ($Candidate in $ConnectionInfoCandidates) {
+			if (($HostName -and $Organization) -or !(Test-Path -Path $Candidate)) {
+				continue
 			}
-			if (!$Organization -and $ExistingConnectionInfo.OrganizationID) {
-				$script:Organization = $ExistingConnectionInfo.OrganizationID
+			try {
+				$ExistingConnectionInfo = Get-Content -Path $Candidate -Raw | ConvertFrom-Json
+				if (!$HostName -and $ExistingConnectionInfo.Host) {
+					$script:HostName = $ExistingConnectionInfo.Host
+				}
+				if (!$Organization -and $ExistingConnectionInfo.OrganizationID) {
+					$script:Organization = $ExistingConnectionInfo.OrganizationID
+				}
+				Write-Log "Using ConnectionInfo from `"$Candidate`" for server URL and organization."
 			}
-			Write-Log "Using existing ConnectionInfo.json for server URL and organization."
-		}
-		catch {
-			Write-Log "Failed to read existing ConnectionInfo.json.  Continuing with supplied parameters."
+			catch {
+				Write-Log "Failed to read `"$Candidate`".  Continuing with supplied parameters."
+			}
 		}
 	}
 
@@ -129,7 +141,9 @@ function Run-StartupChecks {
 }
 
 function Stop-Remotely {
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service & sc delete Remotely_Service" -Wait -WindowStyle Hidden
+	# Останавливаем службу, но НЕ удаляем её: если обновление сорвётся,
+	# служба должна остаться и агент продолжит работать на старой версии.
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
 	Stop-Process -Name Remotely_Agent -Force -ErrorAction SilentlyContinue
 	Stop-Process -Name Remotely_Desktop -Force -ErrorAction SilentlyContinue
 
@@ -145,8 +159,27 @@ function Stop-Remotely {
 	Start-Sleep -Milliseconds 500
 }
 
+function Start-Remotely {
+	# Возвращает систему в рабочее состояние: служба должна существовать и быть запущенной.
+	try {
+		if (!(Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue)) {
+			Write-Log "Remotely_Service is missing.  Recreating it."
+			New-Service -Name "Remotely_Service" -BinaryPathName "`"$InstallPath\Remotely_Agent.exe`"" -DisplayName "Remotely Service" -StartupType Automatic -Description "Background service that maintains a connection to the Remotely server.  The service is used for remote support and maintenance by this computer's administrators."
+			Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
+		}
+		Start-Service -Name Remotely_Service -ErrorAction Stop
+		Write-Log "Remotely_Service started."
+	}
+	catch {
+		Write-Log "Failed to start Remotely_Service: $($Error[0].Exception.Message)"
+	}
+}
+
 function Uninstall-Remotely {
 	Stop-Remotely
+	# При удалении службу убираем явно: Stop-Remotely её намеренно оставляет,
+	# чтобы неудачное обновление не убивало агента.
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc delete Remotely_Service" -Wait -WindowStyle Hidden
 	Remove-Item -Path $InstallPath -Force -Recurse -ErrorAction SilentlyContinue
 	Remove-NetFirewallRule -Name "Remotely Desktop Unattended" -ErrorAction SilentlyContinue
 }
@@ -166,6 +199,25 @@ function Install-Remotely {
 			$ConnectionInfo.ServerVerificationToken = ""
 		}
 	}
+	elseif (Test-Path -Path "$InstallPath.old\ConnectionInfo.json") {
+		# Каталог остался переименованным после прерванного обновления.
+		$ConnectionInfo = Get-Content -Path "$InstallPath.old\ConnectionInfo.json" | ConvertFrom-Json
+		if ($ConnectionInfo) {
+			$ConnectionInfo.Host = $HostName
+			$ConnectionInfo.OrganizationID = $Organization
+			$ConnectionInfo.ServerVerificationToken = ""
+		}
+	}
+	elseif (Test-Path -Path "$env:TEMP\Remotely-ConnectionInfo.json") {
+		# Резервная копия, которую мы сохраняем при каждом обновлении,
+		# чтобы DeviceID не терялся, если рабочий каталог пропал.
+		$ConnectionInfo = Get-Content -Path "$env:TEMP\Remotely-ConnectionInfo.json" | ConvertFrom-Json
+		if ($ConnectionInfo) {
+			$ConnectionInfo.Host = $HostName
+			$ConnectionInfo.OrganizationID = $Organization
+			$ConnectionInfo.ServerVerificationToken = ""
+		}
+	}
 	else {
 		New-Item -ItemType Directory -Path "$InstallPath" -Force
 	}
@@ -179,6 +231,10 @@ function Install-Remotely {
 			ServerVerificationToken = "";
 		}
 	}
+
+	# Резервная копия до любых изменений каталога: если обновление прервётся
+	# и рабочий каталог пропадёт, DeviceID и адрес сервера можно будет взять отсюда.
+	New-Item -ItemType File -Path "$env:TEMP\Remotely-ConnectionInfo.json" -Value (ConvertTo-Json -InputObject $ConnectionInfo) -Force
 
 	if ($HostName.EndsWith("/")) {
 		$HostName = $HostName.Substring(0, $HostName.LastIndexOf("/"))
@@ -216,6 +272,7 @@ function Install-Remotely {
 	if (!$PackageIsValid) {
 		Write-Log "Downloaded package is incomplete or corrupted.  Aborting without changing the current installation."
 		Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+		Start-Remotely
 		Do-Exit
 	}
 
@@ -223,7 +280,7 @@ function Install-Remotely {
 
 	# Замена каталога: сначала переименовываем старый (это почти атомарная операция),
 	# затем ставим на его место новый. Если переименовать не удалось, рабочая
-	# установка остаётся нетронутой.
+	# установка остаётся нетронутой и служба снова запускается.
 	$OldInstallPath = "$InstallPath.old"
 	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -234,11 +291,25 @@ function Install-Remotely {
 		catch {
 			Write-Log "Failed to move the current installation aside.  Aborting to keep the current version working."
 			Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+			Start-Remotely
 			Do-Exit
 		}
 	}
 
-	Move-Item -Path $StagingPath -Destination $InstallPath -Force
+	try {
+		Move-Item -Path $StagingPath -Destination $InstallPath -Force -ErrorAction Stop
+	}
+	catch {
+		Write-Log "Failed to move the new version into place.  Restoring the previous installation."
+		Remove-Item -Path $InstallPath -Recurse -Force -ErrorAction SilentlyContinue
+		if (Test-Path -Path $OldInstallPath) {
+			Move-Item -Path $OldInstallPath -Destination $InstallPath -Force -ErrorAction SilentlyContinue
+		}
+		Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+		Start-Remotely
+		Do-Exit
+	}
+
 	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 
 	New-Item -ItemType File -Path "$InstallPath\ConnectionInfo.json" -Value (ConvertTo-Json -InputObject $ConnectionInfo) -Force
@@ -257,16 +328,10 @@ function Install-Remotely {
 		Invoke-RestMethod -Method Post -ContentType "application/json" -Uri "$HostName/api/devices" -Body $Body
 	}
 
-	# Служба могла остаться зарегистрированной (например, при обновлении),
-	# тогда New-Service упадёт.
-	if (Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue) {
-		Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc delete Remotely_Service" -Wait -WindowStyle Hidden
-		Start-Sleep -Seconds 2
-	}
-
-	New-Service -Name "Remotely_Service" -BinaryPathName "`"$InstallPath\Remotely_Agent.exe`"" -DisplayName "Remotely Service" -StartupType Automatic -Description "Background service that maintains a connection to the Remotely server.  The service is used for remote support and maintenance by this computer's administrators."
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
-	Start-Service -Name Remotely_Service
+	# Stop-Remotely больше не удаляет службу: если она уже есть, достаточно
+	# запустить её с новым каталогом. Если её нет (чистая установка или старый
+	# неудачный апдейт) — создаём.
+	Start-Remotely
 }
 
 #endregion
