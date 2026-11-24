@@ -210,13 +210,24 @@ function Uninstall-Remotely {
 function Install-Remotely {
 	# ETag не обязателен для установки: при офлайн-установке из локального файла
 	# сервер недоступен, и это не должно обрывать установку.
+	# Берём ETag из CheckPackage (агент проверяет обновление именно там), запасной
+	# вариант — статический файл, последний — «unknown».
 	$ETag = $null
 	try {
-		$HeadResponse = Invoke-WebRequest -Uri "$HostName/Content/Remotely-Win-$Platform.zip" -Method Head -UseBasicParsing -ErrorAction Stop
+		$HeadResponse = Invoke-WebRequest -Uri "$HostName/api/AgentUpdate/CheckPackage/$Platform" -Method Head -UseBasicParsing -ErrorAction Stop
 		$ETag = $HeadResponse.Headers["ETag"]
 	}
 	catch {
-		Write-Log "Failed to get ETag from server (offline install?).  Continuing."
+		Write-Log "CheckPackage HEAD failed.  Falling back to the static package file."
+	}
+	if (!$ETag) {
+		try {
+			$HeadResponse = Invoke-WebRequest -Uri "$HostName/Content/Remotely-Win-$Platform.zip" -Method Head -UseBasicParsing -ErrorAction Stop
+			$ETag = $HeadResponse.Headers["ETag"]
+		}
+		catch {
+			Write-Log "Failed to get ETag from server (offline install?).  Continuing."
+		}
 	}
 	if (!$ETag) {
 		Write-Log "No ETag available.  Agent will check for updates on its own schedule."

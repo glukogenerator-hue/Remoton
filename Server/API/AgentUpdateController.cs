@@ -101,7 +101,9 @@ public class AgentUpdateController : ControllerBase
     // свой DeviceId. Если в Server Config заданы группы волны, устройство вне этих
     // групп всегда получает 304 — оно не обновится, пока его группу не добавят в волну.
     // Старые агенты продолжают проверять статический файл и обновляются без ограничений.
-    [HttpGet("[action]/{platform}")]
+    // ВАЖНО: агент проверяет обновление методом HEAD. Объявляем и GET, и HEAD,
+    // иначе HEAD получает 405 и агент трактует это как «есть обновление».
+    [AcceptVerbs("GET", "HEAD", Route = "[action]/{platform}")]
     public async Task<ActionResult> CheckPackage(string platform, [FromQuery] string? deviceId)
     {
         // Агент считает «есть обновление» любым ответом кроме 304 и запускает
@@ -131,18 +133,6 @@ public class AgentUpdateController : ControllerBase
             }
 
             if (!IsDeviceInUpdateWave(device, settings))
-            {
-                return StatusCode((int)HttpStatusCode.NotModified);
-            }
-
-            // Агент, уже стоящий на самой свежей версии из известных серверу,
-            // всегда получает 304 независимо от ETag: установщик записывает в
-            // etag.txt статический ETag файла /Content, который не совпадает
-            // с ETag этого эндпоинта, и сравнение по ETag сходится никогда.
-            if (device is not null &&
-                Version.TryParse(device.AgentVersion, out var deviceVersion) &&
-                Version.TryParse(_dataService.GetLatestKnownAgentVersion(), out var latestVersion) &&
-                deviceVersion >= latestVersion)
             {
                 return StatusCode((int)HttpStatusCode.NotModified);
             }

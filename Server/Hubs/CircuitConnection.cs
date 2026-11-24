@@ -311,7 +311,7 @@ public class CircuitConnection : CircuitHandler, ICircuitConnection
 
     public Task RemoveDevices(string[] deviceIDs)
     {
-        if (User is not null)
+        if (_user is not null)
         {
             var filterDevices = _dataService.FilterDeviceIdsByUserPermission(deviceIDs, User);
             _dataService.RemoveDevices(filterDevices);
@@ -332,7 +332,7 @@ public class CircuitConnection : CircuitHandler, ICircuitConnection
         {
             username = "Remotely Server";
         }
-        else if (User is not null)
+        else if (_user is not null)
         {
             username = User.UserName;
             deviceIds = _dataService.FilterDeviceIdsByUserPermission(deviceIds.ToArray(), User);

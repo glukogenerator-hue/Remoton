@@ -255,7 +255,10 @@ public class AgentHub : Hub<IAgentHubClient>
                 }
             }
 
-            _autoRepairAttempts[device.ID] = (DateTimeOffset.Now, (state.Attempts) + 1);
+            _autoRepairAttempts.AddOrUpdate(
+                device.ID,
+                id => (DateTimeOffset.Now, 1),
+                (id, prev) => (DateTimeOffset.Now, prev.Attempts + 1));
 
             _logger.LogInformation(
                 "Auto-repairing agent on {deviceName}: version {current} -> {target} (attempt {attempt}).",
