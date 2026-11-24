@@ -32,6 +32,11 @@ param (
 #region Set Variables
 $LogPath = "$env:TEMP\Remotely_Install.txt"
 
+# Критично: агент запускает установщик со своим рабочим каталогом
+# (C:\Program Files\Remotely). Windows не позволяет переименовать каталог,
+# который является текущим для процесса, из-за чего замена каталога падала.
+Set-Location -Path $env:TEMP
+
 [string]$HostName = $null
 if ($ServerUrl) {
 	$HostName = $ServerUrl
@@ -141,9 +146,10 @@ function Run-StartupChecks {
 }
 
 function Stop-Remotely {
-	# Отключаем автоперезапуск службы, иначе SCM поднимет агента через 5 секунд
-	# после kill, он снова залочит файлы и замена каталога не пройдёт.
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc failure Remotely_Service reset= 0 actions= " -Wait -WindowStyle Hidden
+	# Отключаем только автоперезапуск после падения (failure actions), чтобы SCM
+	# не поднимал убитого агента через 5 секунд и он не лочил файлы заново.
+	# Автозапуск при загрузке системы (StartupType Automatic) не меняется.
+	& sc.exe failure Remotely_Service reset= 0 actions= "" | Out-Null
 
 	# Останавливаем службу и ждём именно состояния STOPPED.
 	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
@@ -170,15 +176,16 @@ function Stop-Remotely {
 function Start-Remotely {
 	# Возвращает систему в рабочее состояние: служба должна существовать и быть запущенной.
 	try {
+		# Автоперезапуск возвращаем ВСЕГДА, даже если запуск ниже не удастся:
+		# иначе машина останется без защиты от падений до переустановки.
 		if (!(Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue)) {
 			Write-Log "Remotely_Service is missing.  Recreating it."
 			New-Service -Name "Remotely_Service" -BinaryPathName "`"$InstallPath\Remotely_Agent.exe`"" -DisplayName "Remotely Service" -StartupType Automatic -Description "Background service that maintains a connection to the Remotely server.  The service is used for remote support and maintenance by this computer's administrators."
-			Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
 		}
-		Start-Service -Name Remotely_Service -ErrorAction Stop
 
-		# Возвращаем автоперезапуск, который Stop-Remotely отключал на время обновления.
-		Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
+		& sc.exe failure Remotely_Service reset=5 actions=restart/5000 | Out-Null
+
+		Start-Service -Name Remotely_Service -ErrorAction Stop
 		Write-Log "Remotely_Service started."
 	}
 	catch {
@@ -389,6 +396,20 @@ try {
 }
 catch {
 	Write-Log -Message "Error occurred: $($Error[0].InvocationInfo.PositionMessage)"
+
+	# Страховка: что бы ни случилось, машина не должна остаться без запущенной
+	# службы (мы могли её останавливать на время обновления).
+	try {
+		$svc = Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue
+		if (!$svc -or $svc.Status -ne "Running") {
+			Write-Log "Attempting to start Remotely_Service after the error."
+			Start-Remotely
+		}
+	}
+	catch {
+		Write-Log "Failed to restart Remotely_Service after the error."
+	}
+
 	throw $Error[0]
 	Do-Exit
 }
