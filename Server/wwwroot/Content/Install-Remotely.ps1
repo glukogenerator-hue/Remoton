@@ -212,9 +212,11 @@ function Install-Remotely {
 	# сервер недоступен, и это не должно обрывать установку.
 	# Берём ETag из CheckPackage (агент проверяет обновление именно там), запасной
 	# вариант — статический файл, последний — «unknown».
+	# ВАЖНО: платформа для CheckPackage — «win-x64»/«win-x86» (как называет её агент),
+	# а не «x64»: иначе сервер ответит 304 без ETag, и сходимость etag.txt сломается.
 	$ETag = $null
 	try {
-		$HeadResponse = Invoke-WebRequest -Uri "$HostName/api/AgentUpdate/CheckPackage/$Platform" -Method Head -UseBasicParsing -ErrorAction Stop
+		$HeadResponse = Invoke-WebRequest -Uri "$HostName/api/AgentUpdate/CheckPackage/win-$Platform" -Method Head -UseBasicParsing -ErrorAction Stop
 		$ETag = $HeadResponse.Headers["ETag"]
 	}
 	catch {

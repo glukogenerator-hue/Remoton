@@ -135,6 +135,18 @@ $results = foreach ($pc in $ComputerName) {
         }
         Start-Sleep -Seconds 1
         & schtasks.exe /s $pc /delete /tn $tn /f 2>&1 | Out-Null
+
+        # Забираем журналы установки/ремонта для разбора, если машина не ожила.
+        $logDir = "$env:TEMP\RemotonRepairLogs"
+        if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        foreach ($remoteLog in @(
+            "C:\Windows\Temp\RemotonRepair.txt",
+            "C:\Windows\Temp\Remotely_Install.txt"
+        )) {
+            Copy-Item -Path "\\$pc\C$\Windows\Temp\$(Split-Path $remoteLog -Leaf)" `
+                -Destination "$logDir\$pc-$(Split-Path $remoteLog -Leaf)" -Force -ErrorAction SilentlyContinue
+        }
+
         [pscustomobject]@{ Computer = $pc; Result = "STARTED" }
     }
     catch {
