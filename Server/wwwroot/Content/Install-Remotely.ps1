@@ -141,17 +141,25 @@ function Run-StartupChecks {
 }
 
 function Stop-Remotely {
-	# Останавливаем службу, но НЕ удаляем её: если обновление сорвётся,
-	# служба должна остаться и агент продолжит работать на старой версии.
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
-	Stop-Process -Name Remotely_Agent -Force -ErrorAction SilentlyContinue
-	Stop-Process -Name Remotely_Desktop -Force -ErrorAction SilentlyContinue
+	# Отключаем автоперезапуск службы, иначе SCM поднимет агента через 5 секунд
+	# после kill, он снова залочит файлы и замена каталога не пройдёт.
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc failure Remotely_Service reset= 0 actions= " -Wait -WindowStyle Hidden
 
-	# Ждём, пока процесс действительно завершится и отпустит файлы.
-	# Распаковка поверх ещё залоченных файлов оставляла пустые deps.json,
-	# после чего агент не запускался.
+	# Останавливаем службу и ждём именно состояния STOPPED.
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
+
 	for ($i = 0; $i -lt 60; $i++) {
-		if (!(Get-Process -Name Remotely_Agent -ErrorAction SilentlyContinue)) {
+		$status = (Get-Service -Name "Remotely_Service" -ErrorAction SilentlyContinue).Status
+		if (!$status -or $status -eq "Stopped") { break }
+		Start-Sleep -Milliseconds 500
+	}
+
+	# Добиваем процессы во всех сессиях (SYSTEM видит все), включая Desktop.
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /T /IM Remotely_Agent.exe & taskkill /F /T /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
+
+	for ($i = 0; $i -lt 40; $i++) {
+		if (!(Get-Process -Name Remotely_Agent -ErrorAction SilentlyContinue) -and
+			!(Get-Process -Name Remotely_Desktop -ErrorAction SilentlyContinue)) {
 			break
 		}
 		Start-Sleep -Milliseconds 500
@@ -168,6 +176,9 @@ function Start-Remotely {
 			Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
 		}
 		Start-Service -Name Remotely_Service -ErrorAction Stop
+
+		# Возвращаем автоперезапуск, который Stop-Remotely отключал на время обновления.
+		Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc.exe failure `"Remotely_Service`" reset=5 actions=restart/5000" -Wait -WindowStyle Hidden
 		Write-Log "Remotely_Service started."
 	}
 	catch {
@@ -294,10 +305,21 @@ function Install-Remotely {
 	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 
 	if (Test-Path -Path $InstallPath) {
-		try {
-			Rename-Item -Path $InstallPath -NewName $OldInstallPath -ErrorAction Stop
+		$renamed = $false
+		for ($attempt = 1; $attempt -le 5; $attempt++) {
+			try {
+				Rename-Item -Path $InstallPath -NewName $OldInstallPath -ErrorAction Stop
+				$renamed = $true
+				break
+			}
+			catch {
+				Write-Log "Attempt $attempt to move the current installation aside failed: $($Error[0].Exception.Message)"
+				Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /T /IM Remotely_Agent.exe & taskkill /F /T /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
+				Start-Sleep -Seconds 2
+			}
 		}
-		catch {
+
+		if (!$renamed) {
 			Write-Log "Failed to move the current installation aside.  Aborting to keep the current version working."
 			Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
 			Start-Remotely

@@ -212,6 +212,10 @@ public class AgentHub : Hub<IAgentHubClient>
         return false;
     }
 
+    // Защита от шторма переустановок: если обновление на машине не удаётся,
+    // не долбим её командой при каждом переподключении.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset LastAttempt, int Attempts)> _autoRepairAttempts = new();
+
     // Автовосстановление агентов: если в настройках задана целевая версия,
     // подключившийся агент с другой версией получает команду переустановки.
     // Это позволяет поднять машины, которые подключаются лишь на несколько секунд:
@@ -224,17 +228,41 @@ public class AgentHub : Hub<IAgentHubClient>
             var targetVersion = settings.AutoRepairAgentVersion;
 
             if (string.IsNullOrWhiteSpace(targetVersion) ||
-                string.IsNullOrWhiteSpace(device.AgentVersion) ||
-                string.Equals(device.AgentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
+                string.IsNullOrWhiteSpace(device.AgentVersion))
             {
                 return;
             }
 
+            if (string.Equals(device.AgentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                // Версия сошлась — сбрасываем счётчик попыток для этой машины.
+                _autoRepairAttempts.TryRemove(device.ID, out _);
+                return;
+            }
+
+            if (_autoRepairAttempts.TryGetValue(device.ID, out var state))
+            {
+                var sinceLast = DateTimeOffset.Now - state.LastAttempt;
+                if (sinceLast < TimeSpan.FromMinutes(30) ||
+                    (state.Attempts >= 3 && sinceLast < TimeSpan.FromHours(24)))
+                {
+                    _logger.LogDebug(
+                        "Skipping auto-repair for {deviceName}: {attempts} attempt(s), last {minutes:F0} min ago.",
+                        device.DeviceName,
+                        state.Attempts,
+                        sinceLast.TotalMinutes);
+                    return;
+                }
+            }
+
+            _autoRepairAttempts[device.ID] = (DateTimeOffset.Now, (state.Attempts) + 1);
+
             _logger.LogInformation(
-                "Auto-repairing agent on {deviceName}: version {current} -> {target}.",
+                "Auto-repairing agent on {deviceName}: version {current} -> {target} (attempt {attempt}).",
                 device.DeviceName,
                 device.AgentVersion,
-                targetVersion);
+                targetVersion,
+                state.Attempts + 1);
 
             await Clients.Caller.ReinstallAgent();
         }
