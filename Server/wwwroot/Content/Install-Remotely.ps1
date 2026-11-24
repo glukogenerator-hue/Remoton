@@ -301,71 +301,34 @@ function Install-Remotely {
 		Do-Exit
 	}
 
-	# Распаковываем и проверяем новую версию ДО того, как трогать рабочую установку.
-	# Прерванная переустановка раньше оставляла пустые файлы в рабочем каталоге
-	# (например, Remotely_Agent.deps.json), и агент не мог запуститься.
-	$StagingPath = "$InstallPath.new"
-	Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
-	Expand-Archive -Path "$env:TEMP\Remotely-Win-$Platform.zip" -DestinationPath $StagingPath -Force
-
-	$StagedDepsPath = "$StagingPath\Remotely_Agent.deps.json"
-	$PackageIsValid = (Test-Path -Path "$StagingPath\Remotely_Agent.exe") -and
-		(Test-Path -Path $StagedDepsPath) -and
-		((Get-Item -Path $StagedDepsPath).Length -gt 100)
-
-	if (!$PackageIsValid) {
-		Write-Log "Downloaded package is incomplete or corrupted.  Aborting without changing the current installation."
-		Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
-		Start-Remotely
-		Do-Exit
-	}
-
 	Stop-Remotely
 
-	# Замена каталога: сначала переименовываем старый (это почти атомарная операция),
-	# затем ставим на его место новый. Если переименовать не удалось, рабочая
-	# установка остаётся нетронутой и служба снова запускается.
-	$OldInstallPath = "$InstallPath.old"
-	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
-
-	if (Test-Path -Path $InstallPath) {
-		$renamed = $false
-		for ($attempt = 1; $attempt -le 5; $attempt++) {
-			try {
-				Rename-Item -Path $InstallPath -NewName $OldInstallPath -ErrorAction Stop
-				$renamed = $true
-				break
-			}
-			catch {
-				Write-Log "Attempt $attempt to move the current installation aside failed: $($Error[0].Exception.Message)"
-				Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /IM Remotely_Agent.exe & taskkill /F /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
-				Start-Sleep -Seconds 2
-			}
+	# Распаковка поверх существующего каталога. Замена каталога через
+	# переименование отказала на всех реальных машинах: любой открытый хендлер
+	# (антивирус, индексатор, остаточный процесс) блокирует rename, и обновление
+	# никогда не завершалось. После Stop-Remotely все процессы агента
+	# остановлены и дожиты, поэтому запись поверх безопасна. Целостность
+	# проверяем после распаковки; при неудаче повторяем, затем поднимаем
+	# службу — следующий цикл обновления дочинит оставшееся.
+	$unpackOk = $false
+	for ($unpackAttempt = 1; $unpackAttempt -le 3; $unpackAttempt++) {
+		Expand-Archive -Path "$env:TEMP\Remotely-Win-$Platform.zip" -DestinationPath "$InstallPath" -Force
+		$depsPath = "$InstallPath\Remotely_Agent.deps.json"
+		if ((Test-Path -Path "$InstallPath\Remotely_Agent.exe") -and
+			(Test-Path -Path $depsPath) -and
+			((Get-Item -Path $depsPath).Length -gt 100)) {
+			$unpackOk = $true
+			break
 		}
-
-		if (!$renamed) {
-			Write-Log "Failed to move the current installation aside.  Aborting to keep the current version working."
-			Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
-			Start-Remotely
-			Do-Exit
-		}
+		Write-Log "Unpack attempt $unpackAttempt produced an incomplete install.  Retrying."
+		Start-Sleep -Seconds 3
 	}
 
-	try {
-		Move-Item -Path $StagingPath -Destination $InstallPath -Force -ErrorAction Stop
-	}
-	catch {
-		Write-Log "Failed to move the new version into place.  Restoring the previous installation."
-		Remove-Item -Path $InstallPath -Recurse -Force -ErrorAction SilentlyContinue
-		if (Test-Path -Path $OldInstallPath) {
-			Move-Item -Path $OldInstallPath -Destination $InstallPath -Force -ErrorAction SilentlyContinue
-		}
-		Remove-Item -Path $StagingPath -Recurse -Force -ErrorAction SilentlyContinue
+	if (!$unpackOk) {
+		Write-Log "Failed to unpack the package after 3 attempts.  Restarting the current agent."
 		Start-Remotely
 		Do-Exit
 	}
-
-	Remove-Item -Path $OldInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 
 	New-Item -ItemType File -Path "$InstallPath\ConnectionInfo.json" -Value (ConvertTo-Json -InputObject $ConnectionInfo) -Force
 
