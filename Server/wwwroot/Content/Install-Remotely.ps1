@@ -155,7 +155,7 @@ function Stop-Remotely {
 	}
 
 	# Добиваем процессы во всех сессиях (SYSTEM видит все), включая Desktop.
-	Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /T /IM Remotely_Agent.exe & taskkill /F /T /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
+	Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /IM Remotely_Agent.exe & taskkill /F /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
 
 	for ($i = 0; $i -lt 40; $i++) {
 		if (!(Get-Process -Name Remotely_Agent -ErrorAction SilentlyContinue) -and
@@ -314,7 +314,7 @@ function Install-Remotely {
 			}
 			catch {
 				Write-Log "Attempt $attempt to move the current installation aside failed: $($Error[0].Exception.Message)"
-				Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /T /IM Remotely_Agent.exe & taskkill /F /T /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
+				Start-Process -FilePath "cmd.exe" -ArgumentList "/c taskkill /F /IM Remotely_Agent.exe & taskkill /F /IM Remotely_Desktop.exe" -Wait -WindowStyle Hidden
 				Start-Sleep -Seconds 2
 			}
 		}
