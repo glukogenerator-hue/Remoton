@@ -146,12 +146,11 @@ function Run-StartupChecks {
 }
 
 function Stop-Remotely {
-	# Отключаем только автоперезапуск после падения (failure actions), чтобы SCM
-	# не поднимал убитого агента через 5 секунд и он не лочил файлы заново.
-	# Автозапуск при загрузке системы (StartupType Automatic) не меняется.
-	# Вызываем через cmd: классическая форма очистки actions, документированная
-	# для cmd; PowerShell 5.1 передаёт пустые аргументы в sc.exe ненадёжно.
-	Start-Process cmd.exe -ArgumentList '/c sc failure Remotely_Service reset= 0 actions= ""' -Wait -WindowStyle Hidden
+	# На время обновления отодвигаем автоперезапуск на 60 секунд: SCM не должен
+	# поднимать убитого агента через 5 секунд, пока идёт распаковка и замена.
+	# Пустой actions= ("") в разных оболочках срабатывает ненадёжно, поэтому
+	# используем явное значение с большой задержкой. Вернём restart/5000 в Start-Remotely.
+	Start-Process cmd.exe -ArgumentList '/c sc failure Remotely_Service reset= 0 actions= restart/60000' -Wait -WindowStyle Hidden
 
 	# Останавливаем службу и ждём именно состояния STOPPED.
 	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
