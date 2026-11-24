@@ -185,6 +185,8 @@ public class AgentHub : Hub<IAgentHubClient>
 
             _serviceSessionCache.AddOrUpdateByConnectionId(Context.ConnectionId, Device);
 
+            await TryAutoRepairAgent(Device);
+
             var userIDs = _circuitManager.Connections.Select(x => x.User.Id);
 
             var filteredUserIDs = _dataService.FilterUsersByDevicePermission(userIDs, Device.ID);
@@ -208,6 +210,38 @@ public class AgentHub : Hub<IAgentHubClient>
 
         Context.Abort();
         return false;
+    }
+
+    // Автовосстановление агентов: если в настройках задана целевая версия,
+    // подключившийся агент с другой версией получает команду переустановки.
+    // Это позволяет поднять машины, которые подключаются лишь на несколько секунд:
+    // команда уходит сразу в DeviceCameOnline, ещё до того, как соединение оборвётся.
+    private async Task TryAutoRepairAgent(Device device)
+    {
+        try
+        {
+            var settings = await _dataService.GetSettings();
+            var targetVersion = settings.AutoRepairAgentVersion;
+
+            if (string.IsNullOrWhiteSpace(targetVersion) ||
+                string.IsNullOrWhiteSpace(device.AgentVersion) ||
+                string.Equals(device.AgentVersion, targetVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                "Auto-repairing agent on {deviceName}: version {current} -> {target}.",
+                device.DeviceName,
+                device.AgentVersion,
+                targetVersion);
+
+            await Clients.Caller.ReinstallAgent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while requesting automatic agent repair.");
+        }
     }
 
     public async Task DeviceHeartbeat(DeviceClientDto device)

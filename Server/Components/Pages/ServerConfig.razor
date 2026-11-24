@@ -136,6 +136,16 @@
                 <ValidationMessage For="() => Input.OfflineDeviceAlertThresholdInDays" />
             </div>
             <div class="form-group">
+                <label class="control-label">Auto-Repair Agent Version</label>
+                <br />
+                <InputText @bind-Value="Input.AutoRepairAgentVersion" class="form-control" autocomplete="off" placeholder="e.g. 2026.11.20.0730" />
+                <small class="text-muted">
+                    Agents reporting any other version are told to reinstall as soon as they connect.
+                    Leave empty to disable.
+                </small>
+                <ValidationMessage For="() => Input.AutoRepairAgentVersion" />
+            </div>
+            <div class="form-group">
                 <label>Enable Windows Event Log</label>
                 <br />
                 <InputCheckbox @bind-Value="Input.EnableWindowsEventLog" autocomplete="off" />
