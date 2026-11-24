@@ -33,7 +33,7 @@ param(
     [string[]]$ComputerName,
     [string]$ComputerListPath,
     [switch]$AllDomainComputers,
-    [int]$Throttle = 20,
+    [int]$BatchPauseSeconds = 0,
     [string]$ServerUrl = "https://help.urldot.ru",
     [string]$OutLog = "$env:TEMP\Repair-Remotely.log"
 )
@@ -107,37 +107,38 @@ $remoteTargetPath = "C:\Windows\Temp\RemotonRepair.ps1"
 # длинную команду, а base64 от этого скрипта в лимит 261 символ не влезает.
 Set-Content -Path $remoteScriptPath -Value $remoteScript -Encoding UTF8
 
-Write-LogLine "Машин: $($ComputerName.Count). Throttle: $Throttle. Лог на машинах: %TEMP%\RemotonRepair.txt"
+Write-LogLine "Машин: $($ComputerName.Count). Лог на машинах: %TEMP%\RemotonRepair.txt"
 
-$results = $ComputerName | ForEach-Object -ThrottleLimit $Throttle -Parallel {
-    $pc = $_
-    $tn = $using:taskName
-    $source = $using:remoteScriptPath
-    $target = $using:remoteTargetPath
+$results = foreach ($pc in $ComputerName) {
+    $tn = $taskName
+    $target = $remoteTargetPath
     $sharePath = "\\$pc\C$\Windows\Temp\RemotonRepair.ps1"
 
     try {
-        Copy-Item -Path $source -Destination $sharePath -Force -ErrorAction Stop
+        Copy-Item -Path $remoteScriptPath -Destination $sharePath -Force -ErrorAction Stop
     }
     catch {
-        return [pscustomobject]@{ Computer = $pc; Result = "COPY_FAILED: $($_.Exception.Message)" }
+        [pscustomobject]@{ Computer = $pc; Result = "COPY_FAILED: $($_.Exception.Message)" }
+        continue
     }
 
     try {
         & schtasks.exe /s $pc /create /tn $tn /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $target" /sc once /st 00:00 /ru SYSTEM /f 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            return [pscustomobject]@{ Computer = $pc; Result = "CREATE_FAILED (code $LASTEXITCODE)" }
+            [pscustomobject]@{ Computer = $pc; Result = "CREATE_FAILED (code $LASTEXITCODE)" }
+            continue
         }
         & schtasks.exe /s $pc /run /tn $tn 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            return [pscustomobject]@{ Computer = $pc; Result = "RUN_FAILED (code $LASTEXITCODE)" }
+            [pscustomobject]@{ Computer = $pc; Result = "RUN_FAILED (code $LASTEXITCODE)" }
+            continue
         }
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 1
         & schtasks.exe /s $pc /delete /tn $tn /f 2>&1 | Out-Null
-        return [pscustomobject]@{ Computer = $pc; Result = "STARTED" }
+        [pscustomobject]@{ Computer = $pc; Result = "STARTED" }
     }
     catch {
-        return [pscustomobject]@{ Computer = $pc; Result = "ERROR: $($_.Exception.Message)" }
+        [pscustomobject]@{ Computer = $pc; Result = "ERROR: $($_.Exception.Message)" }
     }
 }
 
