@@ -149,7 +149,9 @@ function Stop-Remotely {
 	# Отключаем только автоперезапуск после падения (failure actions), чтобы SCM
 	# не поднимал убитого агента через 5 секунд и он не лочил файлы заново.
 	# Автозапуск при загрузке системы (StartupType Automatic) не меняется.
-	& sc.exe failure Remotely_Service reset= 0 actions= "" | Out-Null
+	# Вызываем через cmd: классическая форма очистки actions, документированная
+	# для cmd; PowerShell 5.1 передаёт пустые аргументы в sc.exe ненадёжно.
+	Start-Process cmd.exe -ArgumentList '/c sc failure Remotely_Service reset= 0 actions= ""' -Wait -WindowStyle Hidden
 
 	# Останавливаем службу и ждём именно состояния STOPPED.
 	Start-Process -FilePath "cmd.exe" -ArgumentList "/c sc stop Remotely_Service" -Wait -WindowStyle Hidden
@@ -183,7 +185,10 @@ function Start-Remotely {
 			New-Service -Name "Remotely_Service" -BinaryPathName "`"$InstallPath\Remotely_Agent.exe`"" -DisplayName "Remotely Service" -StartupType Automatic -Description "Background service that maintains a connection to the Remotely server.  The service is used for remote support and maintenance by this computer's administrators."
 		}
 
-		& sc.exe failure Remotely_Service reset=5 actions=restart/5000 | Out-Null
+		# ВАЖНО: sc.exe требует пробел после знака равенства (reset= 5),
+		# без него команда падает с Invalid parameter и автоперезапуск не
+		# восстанавливается. Вызываем через cmd ради надёжных аргументов.
+		Start-Process cmd.exe -ArgumentList '/c sc failure Remotely_Service reset= 5 actions= restart/5000' -Wait -WindowStyle Hidden
 
 		Start-Service -Name Remotely_Service -ErrorAction Stop
 		Write-Log "Remotely_Service started."
